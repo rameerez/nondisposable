@@ -8,6 +8,7 @@ namespace :nondisposable do
     Rails.logger.info "Refreshing list of disposable domains..."
 
     url = 'https://raw.githubusercontent.com/disposable-email-domains/disposable-email-domains/master/disposable_email_blocklist.conf'
+    # url = 'http://localhost:3002/disposable_email_blocklist.conf'
 
     begin
       downloaded_domains = URI.open(url).read.split("\n")
@@ -15,15 +16,20 @@ namespace :nondisposable do
 
       Rails.logger.info "Downloaded list of disposable domains..."
 
+      domains = (downloaded_domains + Nondisposable.configuration.additional_domains).uniq
+      domains -= Nondisposable.configuration.excluded_domains
+
       ActiveRecord::Base.transaction do
-        Rails.logger.info "Deleting all existing disposable domains to replace them with the new ones..."
+        Rails.logger.info "Updating disposable domains..."
         Nondisposable::DisposableDomain.delete_all
 
-        Rails.logger.info "Importing all new disposable domains..."
-        Nondisposable::DisposableDomain.import downloaded_domains.map { |name| { name: name } }, validate: false
+        domains.map { |domain| Nondisposable::DisposableDomain.create(name: domain.downcase) }
       end
 
-      Rails.logger.info "Finished importing new disposable domains."
+      Rails.logger.info "Refreshing cache..."
+      Nondisposable::DisposableDomain.refresh_cache
+
+      Rails.logger.info "Finished updating disposable domains."
     rescue OpenURI::HTTPError => e
       Rails.logger.error "An error occurred when trying to download the list of disposable domains: #{e.message}"
     rescue => e

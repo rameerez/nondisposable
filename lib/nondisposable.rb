@@ -16,11 +16,18 @@ module Nondisposable
     yield(configuration)
   end
 
+  def self.disposable?(email)
+    domain = email.to_s.split('@').last
+    DisposableDomain.disposable?(domain)
+  end
+
   class Configuration
-    attr_accessor :error_message
+    attr_accessor :error_message, :additional_domains, :excluded_domains
 
     def initialize
       @error_message = "provider is not allowed"
+      @additional_domains = []
+      @excluded_domains = []
     end
   end
 end

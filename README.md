@@ -1,6 +1,6 @@
-# 🗑️ `nondisposable` - Block disposable email addresses in your Rails app
+# 🗑️ `nondisposable` - Block disposable email addresses from signing up to your Rails app
 
-Nondisposable is a Ruby gem for Rails apps that checks and prevents users from signing up with disposable email addresses. It maintains a regularly updated database of known disposable email domains and provides ActiveRecord validations.
+`nondisposable` is a Ruby gem for Rails apps that checks and prevents users from signing up with disposable email addresses. The list of disposable emails is updated daily.
 
 ## Installation
 
@@ -12,31 +12,31 @@ gem 'nondisposable'
 
 And then execute:
 
-```
-$ bundle install
-```
-
-Or install it yourself as:
-
-```
-$ gem install nondisposable
+```bash
+bundle install
 ```
 
 After installing the gem, run the installation generator:
 
-```
-$ rails generate nondisposable:install
+```bash
+rails generate nondisposable:install
 ```
 
-This will create the necessary migration file. Run the migration:
+This will create the necessary migration file, initializer, and set up `whenever` for scheduled updates. Run the migration:
 
+```bash
+rails db:migrate
 ```
-$ rails db:migrate
+
+Finally, populate the initial list of disposable domains:
+
+```bash
+rake nondisposable:update_disposable_domains
 ```
 
 ## Usage
 
-To use Nondisposable in your models, add the following validation:
+To use `nondisposable` in your models, add the following validation:
 
 ```ruby
 class User < ApplicationRecord
@@ -44,33 +44,41 @@ class User < ApplicationRecord
 end
 ```
 
-You can customize the error message by creating an initializer:
+### Configuration
+
+You can customize the gem's behavior by creating an initializer:
 
 ```ruby
 # config/initializers/nondisposable.rb
+
 Nondisposable.configure do |config|
   config.error_message = "is not allowed. Please use a non-disposable email address."
+  config.additional_domains = ['custom-disposable-domain.com']
+  config.excluded_domains = ['false-positive-domain.com']
 end
 ```
 
-To update the list of disposable domains, run:
+### Direct Check
 
-```
-$ rake nondisposable:update_disposable_domains
-```
-
-You can also use the provided whenever configuration to schedule daily updates. Add the following to your `config/schedule.rb`:
+You can also check if an email is disposable directly:
 
 ```ruby
-every 1.day, at: '4:30 am' do
-  rake "nondisposable:update_disposable_domains"
-end
+Nondisposable.disposable?('user@example.com') # => false
+Nondisposable.disposable?('user@disposable-email.com') # => true
 ```
 
-Then update your crontab:
+## Updating disposable domains
 
+To manually update the list of disposable domains, run:
+
+```bash
+rake nondisposable:update_disposable_domains
 ```
-$ whenever --update-crontab
+
+`nondisposable` uses the `whenever` gem to schedule daily updates. If you want to use this feature, make sure to update your crontab:
+
+```bash
+whenever --update-crontab
 ```
 
 ## Development

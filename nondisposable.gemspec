@@ -8,8 +8,8 @@ Gem::Specification.new do |spec|
   spec.authors = ["rameerez"]
   spec.email = ["rubygems@rameerez.com"]
 
-  spec.summary = "Prevent users from signing up with disposable email addresses in Rails applications."
-  spec.description = "Nondisposable is a Ruby gem for Rails 7+ that checks and prevents users from signing up with disposable email addresses. It maintains a database of known disposable email domains and provides ActiveRecord validations."
+  spec.summary = "Block disposable email addresses from signing up to your Rails app"
+  spec.description = "Block disposable email addresses from signing up to your Rails app. The database of known disposable email domains is updated daily."
   spec.homepage = "https://github.com/rameerez/nondisposable"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.0.0"
