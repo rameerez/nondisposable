@@ -8,17 +8,15 @@ Gem::Specification.new do |spec|
   spec.authors = ["rameerez"]
   spec.email = ["rubygems@rameerez.com"]
 
-  spec.summary = "TODO: Write a short summary, because RubyGems requires one."
-  spec.description = "TODO: Write a longer description or delete this line."
+  spec.summary = "Prevent users from signing up with disposable email addresses in Rails applications."
+  spec.description = "Nondisposable is a Ruby gem for Rails 7+ that checks and prevents users from signing up with disposable email addresses. It maintains a database of known disposable email domains and provides ActiveRecord validations."
   spec.homepage = "https://github.com/rameerez/nondisposable"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.0.0"
 
-  # spec.metadata["allowed_push_host"] = "https://rubygems.org"
-
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["source_code_uri"] = "https://github.com/rameerez/nondisposable"
-  spec.metadata["changelog_uri"] = "https://github.com/rameerez/nondisposable"
+  spec.metadata["changelog_uri"] = "https://github.com/rameerez/nondisposable/blob/main/CHANGELOG.md"
 
   # Specify which files should be added to the gem when it is released.
   # The `git ls-files -z` loads the files in the RubyGem that have been added into git.
@@ -33,7 +31,8 @@ Gem::Specification.new do |spec|
   spec.executables = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "rails", ">= 6.0.0"
+  spec.add_dependency "rails", ">= 7.0.0"
+  spec.add_dependency "whenever", "~> 1.0"
 
   # Uncomment to register a new dependency of your gem
   # spec.add_dependency "example-gem", "~> 1.0"
