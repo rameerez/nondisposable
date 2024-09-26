@@ -6,8 +6,9 @@ module Nondisposable
 
     class << self
       def disposable?(domain)
-        Nondisposable.configuration.additional_domains.any? { |d| domain == d.downcase } ||
-        (exists?(name: domain.downcase) && !Nondisposable.configuration.excluded_domains.any?{ |d| domain == d.downcase })
+        domain = domain.to_s.downcase
+        Nondisposable.configuration.additional_domains.include?(domain) ||
+          (where(name: domain).exists? && !Nondisposable.configuration.excluded_domains.include?(domain))
       end
     end
 

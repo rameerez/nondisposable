@@ -17,7 +17,8 @@ module Nondisposable
   end
 
   def self.disposable?(email)
-    domain = email.to_s.split('@').last
+    return false if email.nil? || !email.include?('@')
+    domain = email.to_s.split('@').last.downcase
     DisposableDomain.disposable?(domain)
   end
 
