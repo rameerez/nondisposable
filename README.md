@@ -40,7 +40,14 @@ To use `nondisposable` in your models, add the following validation:
 
 ```ruby
 class User < ApplicationRecord
-  validates :email, nondisposable: true
+  validates_nondisposable_email_of :email
+end
+```
+
+You can also add a custom error message:
+```ruby
+class User < ApplicationRecord
+  validates_nondisposable_email_of :email, message: "is from a disposable email provider"
 end
 ```
 
