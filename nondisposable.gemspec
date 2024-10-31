@@ -9,10 +9,12 @@ Gem::Specification.new do |spec|
   spec.email = ["rubygems@rameerez.com"]
 
   spec.summary = "Block disposable emails from signing up to your Rails app"
-  spec.description = "Block disposable email addresses from signing up to your Rails app. The database of disposable email domains can be automatically updated on a daily basis."
+  spec.description = "Block disposable email addresses from signing up to your Rails app. Comes with a job so you can automatically update the database of disposable email domains on a regular basis (daily, weekly, etc)."
   spec.homepage = "https://github.com/rameerez/nondisposable"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.0.0"
+
+  spec.metadata["allowed_push_host"] = "https://rubygems.org"
 
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["source_code_uri"] = "https://github.com/rameerez/nondisposable"
