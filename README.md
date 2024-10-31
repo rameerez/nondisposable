@@ -1,6 +1,10 @@
 # 🗑️ `nondisposable` - Block disposable email addresses from signing up to your Rails app
 
-`nondisposable` is a Ruby gem for Rails apps that checks and prevents users from signing up with disposable email addresses. The list of disposable emails is updated daily.
+`nondisposable` is a Ruby gem that prevents users from signing up to your Rails app with disposable email addresses.
+
+Just add `validates :email, nondisposable: true` to your User model, and you're done.
+
+It provides a job you can run daily to keep your disposable domain list up to date.
 
 ## Installation
 
@@ -76,7 +80,7 @@ You can customize the gem's behavior by creating an initializer:
 # config/initializers/nondisposable.rb
 
 Nondisposable.configure do |config|
-  config.error_message = "is not allowed. Please use a non-disposable email address."
+  config.error_message = "provider is not allowed. Please use a non-disposable email address."
   config.additional_domains = ['custom-disposable-domain.com']
   config.excluded_domains = ['false-positive-domain.com']
 end
@@ -99,7 +103,9 @@ To manually update the list of disposable domains, run:
 Nondisposable::DomainListUpdater.update
 ```
 
-It's important you keep your disposable domain list up to date. `nondisposable` provides you with an Active Job (`DisposableEmailDomainListUpdateJob`) you can use to schedule daily updates. How you do that, exactly, depends on the queueing system you're using.
+It's important you keep your disposable domain list up to date. `nondisposable` will read from the latest version of the [`disposable-email-domains`](https://github.com/disposable-email-domains/disposable-email-domains) list, which is typically updated every few days.
+
+For this, `nondisposable` provides you with an Active Job (`DisposableEmailDomainListUpdateJob`) that you can use to schedule daily updates. How you do that, exactly, depends on the queueing system you're using.
 
 If you're using `solid_queue` (the Rails 8 default), you can easily add it to your schedule in the `config/recurring.yml` file like this:
 ```yaml
