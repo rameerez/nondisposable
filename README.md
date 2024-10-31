@@ -2,15 +2,15 @@
 
 `nondisposable` is a Ruby gem that prevents users from signing up to your Rails app with disposable email addresses.
 
-Just add
+Simply add to your User model:
 
 ```ruby
 validates :email, nondisposable: true
 ```
 
-to your User model, and you're done.
+That's it! You're done.
 
-It provides a job you can run daily to keep your disposable domain list up to date.
+The gem also provides a job you can run daily to keep your disposable domain list up to date.
 
 ## Installation
 
