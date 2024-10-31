@@ -6,9 +6,16 @@ module ActiveModel
       def validate_each(record, attribute, value)
         return if value.blank?
 
-        domain = value.split('@').last.downcase
-        if Nondisposable::DisposableDomain.disposable?(domain)
-          record.errors.add(attribute, options[:message] || Nondisposable.configuration.error_message)
+        begin
+          domain = value.to_s.split('@').last&.downcase
+          return if domain.nil? # Invalid email format
+
+          if Nondisposable::DisposableDomain.disposable?(domain)
+            record.errors.add(attribute, options[:message] || Nondisposable.configuration.error_message)
+          end
+        rescue StandardError => e
+          Rails.logger.error "Nondisposable validation error: #{e.message}"
+          record.errors.add(attribute, "is an invalid email address, cannot check if it's disposable")
         end
       end
     end
