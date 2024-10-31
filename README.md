@@ -36,18 +36,35 @@ Nondisposable::DomainListUpdater.update
 
 ## Usage
 
-To use `nondisposable` in your models, add the following validation:
+To use `nondisposable` in your models, simply add the validation:
 
 ```ruby
 class User < ApplicationRecord
-  validates_nondisposable_email_of :email
+  validates :email, nondisposable: true
 end
 ```
 
-You can also add a custom error message:
+You can customize the error message:
 ```ruby
 class User < ApplicationRecord
-  validates_nondisposable_email_of :email, message: "is from a disposable email provider"
+  validates :email, nondisposable: { message: "is a disposable email address, please use a permanent email address." }
+end
+```
+
+The validation works seamlessly with other Rails validations:
+```ruby
+class User < ApplicationRecord
+  validates :email,
+            presence: true,
+            format: { with: URI::MailTo::EMAIL_REGEXP },
+            nondisposable: true
+end
+```
+
+If you're validating a different attribute name:
+```ruby
+class User < ApplicationRecord
+  validates :backup_email, nondisposable: true
 end
 ```
 
