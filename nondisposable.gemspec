@@ -8,8 +8,8 @@ Gem::Specification.new do |spec|
   spec.authors = ["rameerez"]
   spec.email = ["rubygems@rameerez.com"]
 
-  spec.summary = "Block disposable email addresses from signing up to your Rails app"
-  spec.description = "Block disposable email addresses from signing up to your Rails app. The database of known disposable email domains is updated daily."
+  spec.summary = "Block disposable emails from signing up to your Rails app"
+  spec.description = "Block disposable email addresses from signing up to your Rails app. The database of disposable email domains can be automatically updated on a daily basis."
   spec.homepage = "https://github.com/rameerez/nondisposable"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.0.0"
@@ -32,11 +32,4 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.add_dependency "rails", ">= 7.0.0"
-  spec.add_dependency "whenever", "~> 1.0"
-
-  # Uncomment to register a new dependency of your gem
-  # spec.add_dependency "example-gem", "~> 1.0"
-
-  # For more information and examples about making a new gem, check out our
-  # guide at: https://bundler.io/guides/creating_gem.html
 end
