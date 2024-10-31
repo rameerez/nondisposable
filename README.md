@@ -22,7 +22,7 @@ After installing the gem, run the installation generator:
 rails generate nondisposable:install
 ```
 
-This will create the necessary migration file, initializer, and set up `whenever` for scheduled updates. Run the migration:
+This will create the necessary migration file, initializer, and a job for scheduled updates. Run the migration:
 
 ```bash
 rails db:migrate
@@ -30,8 +30,8 @@ rails db:migrate
 
 Finally, populate the initial list of disposable domains:
 
-```bash
-rake nondisposable:update_disposable_domains
+```ruby
+Nondisposable::DomainListUpdater.update
 ```
 
 ## Usage
@@ -78,14 +78,19 @@ Nondisposable.disposable?('user@disposable-email.com') # => true
 
 To manually update the list of disposable domains, run:
 
-```bash
-rake nondisposable:update_disposable_domains
+```ruby
+Nondisposable::DomainListUpdater.update
 ```
 
-`nondisposable` uses the `whenever` gem to schedule daily updates. If you want to use this feature, make sure to update your crontab:
+It's important you keep your disposable domain list up to date. `nondisposable` provides you with an Active Job (`DisposableEmailDomainListUpdateJob`) you can use to schedule daily updates. How you do that, exactly, depends on the queueing system you're using.
 
-```bash
-whenever --update-crontab
+If you're using `solid_queue` (the Rails 8 default), you can easily add it to your schedule in the `config/recurring.yml` file like this:
+```yaml
+production:
+  refresh_disposable_domains:
+    class: DisposableEmailDomainListUpdateJob
+    queue: default
+    schedule: every day at 3am US/Pacific
 ```
 
 ## Development
