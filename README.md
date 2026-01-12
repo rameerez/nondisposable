@@ -1,5 +1,10 @@
 # 🗑️ `nondisposable` - Block disposable email addresses from signing up to your Rails app
 
+[![Gem Version](https://badge.fury.io/rb/nondisposable.svg)](https://badge.fury.io/rb/nondisposable)
+
+> [!TIP]
+> **🚀 Ship your next Rails app 10x faster!** I've built **[RailsFast](https://railsfast.com)**, a production-ready Rails boilerplate template that comes with everything you need to launch a software business in days, not weeks.
+
 `nondisposable` is a Ruby gem that prevents users from signing up to your Rails app with disposable email addresses.
 
 Simply add to your User model:
