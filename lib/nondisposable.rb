@@ -4,6 +4,7 @@ require_relative "nondisposable/version"
 require_relative "nondisposable/engine"
 require_relative "nondisposable/email_validator"
 require_relative "nondisposable/domain_list_updater"
+
 module Nondisposable
   class Error < StandardError; end
 
