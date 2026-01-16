@@ -272,13 +272,8 @@ class ConfigurationTest < NondisposableTestCase
   end
 
   def test_disposable_query_with_only_at_symbol
-    # BUG: "@".split('@') returns [] in some Ruby versions, causing .last to be nil
-    # This causes a NoMethodError when trying to call .downcase on nil
-    # Documenting this as a known edge case that needs a fix in the source code
-    # The fix should add: return false if domain.nil? || domain.empty?
-    assert_raises(NoMethodError) do
-      Nondisposable.disposable?("@")
-    end
+    # "@" results in empty domain after split, should return false
+    refute Nondisposable.disposable?("@")
   end
 
   def test_disposable_query_with_uppercase_email
