@@ -11,6 +11,6 @@ group :test do
   gem "minitest", "~> 5.22"
   gem "minitest-reporters", "~> 1.6"
   gem "webmock", "~> 3.19"
-  gem "sqlite3", "~> 1.4"
+  gem "sqlite3", "~> 2.1"
   gem "simplecov", "~> 0.22", require: false
 end
