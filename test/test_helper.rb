@@ -2,15 +2,12 @@
 
 require "bundler/setup"
 
-# SimpleCov must be started before loading any code
+# SimpleCov must be loaded BEFORE any application code
+# Configuration is auto-loaded from .simplecov file
 require "simplecov"
-SimpleCov.start do
-  add_filter "/test/"
-  enable_coverage :branch
-  minimum_coverage line: 95, branch: 90
-end
 
 require "minitest/autorun"
+require "minitest/mock"
 require "minitest/reporters"
 Minitest::Reporters.use!(Minitest::Reporters::SpecReporter.new)
 
