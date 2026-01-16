@@ -32,8 +32,13 @@ end
 # Initialize the application
 Rails.application.initialize!
 
-# Establish in-memory sqlite DB
-ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: ":memory:")
+# Establish a shared-cache in-memory SQLite DB for thread safety.
+# Using mode=memory&cache=shared allows multiple threads to share the same in-memory database.
+# This is essential for tests that use threads (like concurrent validation tests).
+ActiveRecord::Base.establish_connection(
+  adapter: "sqlite3",
+  database: "file::memory:?cache=shared"
+)
 ActiveRecord::Base.logger = Logger.new($stdout)
 ActiveRecord::Base.logger.level = Logger::WARN
 
@@ -123,6 +128,42 @@ module NondisposableTestHelper
     stub_request(:get, %r{raw\.githubusercontent\.com/.*/disposable_email_blocklist\.conf})
       .to_return(status: status, body: body)
   end
+
+  # Ensures all required database tables exist.
+  # This is necessary because generator tests (Rails::Generators::TestCase)
+  # can affect the ActiveRecord connection state, causing in-memory SQLite
+  # tables to become unavailable when tests run in certain orders.
+  def ensure_database_schema!
+    connection = ActiveRecord::Base.connection
+
+    unless connection.table_exists?(:nondisposable_disposable_domains)
+      connection.create_table :nondisposable_disposable_domains do |t|
+        t.string :name, null: false, index: { unique: true }
+        t.timestamps
+      end
+    end
+
+    unless connection.table_exists?(:users)
+      connection.create_table :users do |t|
+        t.string :email
+        t.timestamps
+      end
+    end
+
+    unless connection.table_exists?(:contacts)
+      connection.create_table :contacts do |t|
+        t.string :contact_email
+        t.timestamps
+      end
+    end
+
+    unless connection.table_exists?(:subscribers)
+      connection.create_table :subscribers do |t|
+        t.string :email
+        t.timestamps
+      end
+    end
+  end
 end
 
 # Base test class that includes the helper
@@ -130,6 +171,7 @@ class NondisposableTestCase < Minitest::Test
   include NondisposableTestHelper
 
   def setup
+    ensure_database_schema!
     reset_configuration!
     clear_domains!
     WebMock.reset!
