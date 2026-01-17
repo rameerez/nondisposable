@@ -127,6 +127,38 @@ production:
     schedule: every day at 3am US/Pacific
 ```
 
+## Troubleshooting
+
+### SSL certificate verify failed (unable to get certificate CRL)
+
+If you see this error when running `Nondisposable::DomainListUpdater.update`:
+
+```
+SSL_connect returned=1 errno=0 peeraddr=[::1]:10011 state=error: certificate verify failed (unable to get certificate CRL) (OpenSSL::SSL::SSLError)
+```
+
+This is **not** a bug in `nondisposable`. It's a known incompatibility between OpenSSL 3.6.0 and older versions of Ruby's `openssl` gem (3.3.0 and earlier).
+
+The fix is to update the `openssl` gem to version 3.3.1 or later **in your Rails project**.
+
+Add this to your Rails' project `Gemfile`:
+
+```ruby
+gem "openssl", "~> 3.3.2"
+```
+
+Then run:
+
+```bash
+bundle install
+```
+
+This issue is unlikely to occur in production, it's mostly a development-only issue. It's likely that the exact same codebase fails in development but works fine in production. It only occurs when you have OpenSSL 3.6.0 system-wide AND something intercepting HTTPS traffic (like Cursor's proxy). Users in production or using a regular terminal won't experience it.
+
+This issue is more likely to occur if you're running your Rails console from within certain IDEs (like Cursor) that intercept HTTPS traffic through a local proxy. The updated `openssl` gem properly handles certificate verification in these environments.
+
+For more details, see the [Ruby openssl gem issue](https://github.com/ruby/openssl/issues/949).
+
 ## Development
 
 After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake spec` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
