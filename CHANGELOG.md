@@ -1,4 +1,6 @@
-## [Unreleased]
+## [0.2.1] - 2026-01-17
+
+- Add `[nondisposable]` prefix to all logger calls for better log identification
 
 ## [0.2.0] - 2026-01-16
 
