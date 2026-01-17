@@ -309,7 +309,7 @@ class DomainListUpdaterTest < NondisposableTestCase
     setup_disposable_domain!("keep.com")
     stub_domain_list("a.com\n")
 
-    Nondisposable::DisposableDomain.stub(:create, proc { raise "insert failed" }) do
+    Nondisposable::DisposableDomain.stub(:insert_all, proc { raise "insert failed" }) do
       refute Nondisposable::DomainListUpdater.update
     end
 
@@ -317,21 +317,17 @@ class DomainListUpdaterTest < NondisposableTestCase
     assert_equal %w[keep.com], Nondisposable::DisposableDomain.order(:name).pluck(:name)
   end
 
-  def test_rollback_on_partial_insert_failure
+  def test_insert_all_is_atomic
     setup_disposable_domain!("original.com")
     stub_domain_list("new1.com\nnew2.com\n")
 
-    call_count = 0
-    Nondisposable::DisposableDomain.stub(:create, proc { |args|
-      call_count += 1
-      raise "fail on second" if call_count > 1
-      Nondisposable::DisposableDomain.new(args).tap(&:save!)
-    }) do
-      Nondisposable::DomainListUpdater.update
-    end
+    # With insert_all, the entire insert is a single operation
+    # This test verifies that bulk insert replaces all data correctly
+    Nondisposable::DomainListUpdater.update
 
-    # Due to transaction, original data should be preserved
-    # Note: actual behavior depends on error handling in update method
+    names = Nondisposable::DisposableDomain.order(:name).pluck(:name)
+    assert_equal %w[new1.com new2.com], names
+    refute_includes names, "original.com"
   end
 
   # =========================================================================

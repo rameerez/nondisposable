@@ -28,7 +28,8 @@ module Nondisposable
             Rails.logger.info "[nondisposable] Updating disposable domains..."
             Nondisposable::DisposableDomain.delete_all
 
-            domains.each { |domain| Nondisposable::DisposableDomain.create(name: domain.downcase) }
+            records = domains.map { |domain| { name: domain.downcase } }
+            Nondisposable::DisposableDomain.insert_all(records, record_timestamps: true) if records.any?
           end
 
           Rails.logger.info "[nondisposable] Finished updating disposable domains. Total domains: #{domains.count}"
