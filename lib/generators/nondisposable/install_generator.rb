@@ -29,8 +29,8 @@ module Nondisposable
       def display_post_install_message
         say "\tThe `nondisposable` gem has been successfully installed!", :green
         say "\nTo complete the setup:"
-        say "  1. Run 'rails db:migrate' to create the necessary tables."
-        say "  2. Run 'Nondisposable::DomainListUpdater.update' to populate the initial list of disposable domains."
+        say "  1. Run 'rails db:migrate' to create the necessary tables (this also seeds an initial list of disposable domains bundled with the gem)."
+        say "  2. Run 'Nondisposable::DomainListUpdater.update' to fetch the latest list of disposable domains."
         say "  3. Add 'validates :email, nondisposable: true' to your User model (or any model with an email field)."
         say "  4. Configure your recurrent job according to the README, and make sure you have a functional queuing system (like solid_queue) that can run jobs properly so the disposable emails list is updated regularly."
         say "\nEnjoy your new `nondisposable` users!", :green

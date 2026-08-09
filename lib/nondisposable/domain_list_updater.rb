@@ -8,6 +8,10 @@ module Nondisposable
 
     LIST_URL = 'https://raw.githubusercontent.com/disposable-email-domains/disposable-email-domains/master/disposable_email_blocklist.conf'
 
+    # Snapshot of the upstream blocklist vendored into the gem, used to seed
+    # fresh installs so they are protected before the first remote update.
+    BUNDLED_LIST_PATH = File.expand_path('../../data/disposable_email_blocklist.conf', __dir__)
+
     # Network timeouts (seconds). Without these, a hung connection would block
     # the calling job/thread indefinitely (Net::HTTP defaults to 60s open / 60s read).
     OPEN_TIMEOUT = 10
@@ -29,16 +33,43 @@ module Nondisposable
           true
         else
           Rails.logger.error "[nondisposable] Failed to download the list. HTTP Status: #{response.code}"
+          seed
           false
         end
       rescue SocketError => e
         Rails.logger.error "[nondisposable] Network error occurred: #{e.message}"
+        seed
         false
       rescue StandardError => e
         Rails.logger.error "[nondisposable] An error occurred when trying to update the list of disposable domains: #{e.message}"
+        seed
         false
       end
     end
+
+    # Seeds the domain table from the blocklist snapshot bundled with the gem,
+    # but ONLY when the table is empty. This closes the fresh-install fail-open
+    # window where every email passed validation until the first successful
+    # remote update. Returns true if it seeded, false otherwise.
+    #
+    # The bundled list is a snapshot from the gem's release date — always run
+    # DomainListUpdater.update (e.g. via the provided job) to stay current.
+    def self.seed
+      return false unless Nondisposable::DisposableDomain.none?
+
+      Rails.logger.info "[nondisposable] Domain table is empty; seeding from the blocklist bundled with the gem..."
+      count = replace_domains(bundled_domains)
+      Rails.logger.info "[nondisposable] Seeded #{count} disposable domains from the bundled snapshot. Run Nondisposable::DomainListUpdater.update to fetch the latest list."
+      true
+    rescue StandardError => e
+      Rails.logger.error "[nondisposable] Could not seed from the bundled list: #{e.message}"
+      false
+    end
+
+    def self.bundled_domains
+      File.readlines(BUNDLED_LIST_PATH, chomp: true)
+    end
+    private_class_method :bundled_domains
 
     def self.fetch_list
       uri = URI(LIST_URL)

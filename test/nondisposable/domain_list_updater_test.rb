@@ -181,18 +181,19 @@ class DomainListUpdaterTest < NondisposableTestCase
   # HTTP Failure Tests
   # =========================================================================
 
-  def test_returns_false_on_http_404
+  def test_returns_false_on_http_404_but_seeds_empty_table_from_bundled_list
     stub_domain_list("", status: 404)
 
     refute Nondisposable::DomainListUpdater.update
-    assert_equal 0, Nondisposable::DisposableDomain.count
+    # Failure with an empty table falls back to the bundled snapshot
+    assert_operator Nondisposable::DisposableDomain.count, :>, 1000
   end
 
-  def test_returns_false_on_http_500
+  def test_returns_false_on_http_500_but_seeds_empty_table_from_bundled_list
     stub_domain_list("", status: 500)
 
     refute Nondisposable::DomainListUpdater.update
-    assert_equal 0, Nondisposable::DisposableDomain.count
+    assert_operator Nondisposable::DisposableDomain.count, :>, 1000
   end
 
   def test_returns_false_on_http_503
@@ -222,11 +223,12 @@ class DomainListUpdaterTest < NondisposableTestCase
   # Empty List Tests
   # =========================================================================
 
-  def test_returns_false_on_empty_list
+  def test_returns_false_on_empty_list_but_seeds_empty_table_from_bundled_list
     stub_domain_list("")
 
     refute Nondisposable::DomainListUpdater.update
-    assert_equal 0, Nondisposable::DisposableDomain.count
+    # Failure with an empty table falls back to the bundled snapshot
+    assert_operator Nondisposable::DisposableDomain.count, :>, 1000
   end
 
   def test_returns_false_on_whitespace_only_list
@@ -249,11 +251,12 @@ class DomainListUpdaterTest < NondisposableTestCase
   # Network Error Tests
   # =========================================================================
 
-  def test_returns_false_on_socket_error
+  def test_returns_false_on_socket_error_but_seeds_empty_table_from_bundled_list
     stub_request(:get, /disposable-email-domains/).to_raise(SocketError.new("no network"))
 
     refute Nondisposable::DomainListUpdater.update
-    assert_equal 0, Nondisposable::DisposableDomain.count
+    # Failure with an empty table falls back to the bundled snapshot
+    assert_operator Nondisposable::DisposableDomain.count, :>, 1000
   end
 
   def test_returns_false_on_timeout_error
@@ -418,6 +421,82 @@ class DomainListUpdaterTest < NondisposableTestCase
     # Current behavior may include whitespace
     count = Nondisposable::DisposableDomain.count
     assert count >= 1
+  end
+
+  # =========================================================================
+  # Bundled Seed List Tests
+  # =========================================================================
+
+  def test_bundled_list_file_ships_with_the_gem
+    assert File.exist?(Nondisposable::DomainListUpdater::BUNDLED_LIST_PATH),
+           "Expected bundled blocklist at #{Nondisposable::DomainListUpdater::BUNDLED_LIST_PATH}"
+  end
+
+  def test_bundled_list_contains_thousands_of_clean_domains
+    lines = File.readlines(Nondisposable::DomainListUpdater::BUNDLED_LIST_PATH, chomp: true)
+
+    assert_operator lines.size, :>, 1000
+    assert lines.all? { |l| l == l.strip.downcase && !l.empty? }, "Bundled list should be normalized"
+    assert_includes lines, "mailinator.com"
+  end
+
+  def test_seed_populates_empty_table_from_bundled_list
+    assert_equal 0, Nondisposable::DisposableDomain.count
+
+    assert Nondisposable::DomainListUpdater.seed
+
+    bundled_size = File.readlines(Nondisposable::DomainListUpdater::BUNDLED_LIST_PATH, chomp: true).uniq.size
+    assert_equal bundled_size, Nondisposable::DisposableDomain.count
+    assert Nondisposable::DisposableDomain.exists?(name: "mailinator.com")
+  end
+
+  def test_seed_is_a_noop_when_table_is_populated
+    setup_disposable_domain!("existing.com")
+
+    refute Nondisposable::DomainListUpdater.seed
+
+    assert_equal 1, Nondisposable::DisposableDomain.count
+    assert Nondisposable::DisposableDomain.exists?(name: "existing.com")
+  end
+
+  def test_seed_respects_additional_and_excluded_domains
+    Nondisposable.configuration.additional_domains = ["my-custom-disposable.com"]
+    Nondisposable.configuration.excluded_domains = ["mailinator.com"]
+
+    assert Nondisposable::DomainListUpdater.seed
+
+    assert Nondisposable::DisposableDomain.exists?(name: "my-custom-disposable.com")
+    refute Nondisposable::DisposableDomain.exists?(name: "mailinator.com")
+  end
+
+  def test_seed_returns_false_when_bundled_list_is_unreadable
+    missing_path = "/nonexistent/path/blocklist.conf"
+    Nondisposable::DomainListUpdater.stub(:bundled_domains, proc { File.readlines(missing_path) }) do
+      refute Nondisposable::DomainListUpdater.seed
+    end
+
+    assert_equal 0, Nondisposable::DisposableDomain.count
+  end
+
+  def test_update_failure_does_not_reseed_populated_table
+    setup_disposable_domain!("existing.com")
+    stub_domain_list("", status: 500)
+
+    refute Nondisposable::DomainListUpdater.update
+
+    # Populated table is left untouched — no bundled fallback overwrite
+    assert_equal 1, Nondisposable::DisposableDomain.count
+    assert Nondisposable::DisposableDomain.exists?(name: "existing.com")
+  end
+
+  def test_successful_update_replaces_seeded_data
+    Nondisposable::DomainListUpdater.seed
+    assert_operator Nondisposable::DisposableDomain.count, :>, 1000
+
+    stub_domain_list("fresh.com\n")
+    assert Nondisposable::DomainListUpdater.update
+
+    assert_equal ["fresh.com"], Nondisposable::DisposableDomain.pluck(:name)
   end
 
   # =========================================================================
