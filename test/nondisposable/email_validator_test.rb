@@ -229,7 +229,36 @@ class NondisposableValidatorTest < NondisposableTestCase
   # Error Handling Tests
   # =========================================================================
 
-  def test_error_handling_logs_and_adds_fallback_error
+  def test_check_failure_allows_record_through_by_default
+    Nondisposable::DisposableDomain.stub(:disposable?, proc { raise "boom" }) do
+      user = User.new(email: "x@y.com")
+
+      # Availability-first default: a broken check must not reject signups
+      assert user.valid?, "on_check_failure defaults to :allow, record should be valid"
+      assert_empty user.errors[:email]
+    end
+  end
+
+  def test_check_failure_default_allow_logs_loudly
+    log_output = StringIO.new
+    old_logger = Rails.logger
+    Rails.logger = Logger.new(log_output)
+
+    Nondisposable::DisposableDomain.stub(:disposable?, proc { raise "boom" }) do
+      user = User.new(email: "x@y.com")
+      assert user.valid?
+    end
+
+    assert_includes log_output.string, "ALLOWING"
+    assert_includes log_output.string, "on_check_failure"
+    assert_includes log_output.string, "boom"
+  ensure
+    Rails.logger = old_logger
+  end
+
+  def test_check_failure_reject_mode_adds_fallback_error
+    Nondisposable.configure { |c| c.on_check_failure = :reject }
+
     Nondisposable::DisposableDomain.stub(:disposable?, proc { raise "boom" }) do
       user = User.new(email: "x@y.com")
 
@@ -238,13 +267,43 @@ class NondisposableValidatorTest < NondisposableTestCase
     end
   end
 
+  def test_check_failure_reject_mode_keeps_legacy_message
+    Nondisposable.configure { |c| c.on_check_failure = :reject }
+
+    Nondisposable::DisposableDomain.stub(:disposable?, proc { raise StandardError.new("database error") }) do
+      user = User.new(email: "test@example.com")
+
+      # Should not raise, should add the same error message as pre-0.3.0
+      refute user.valid?
+      assert_equal ["is an invalid email address, cannot check if it's disposable"], user.errors[:email]
+    end
+  end
+
   def test_error_handling_does_not_crash_application
     Nondisposable::DisposableDomain.stub(:disposable?, proc { raise StandardError.new("database error") }) do
       user = User.new(email: "test@example.com")
 
-      # Should not raise, should add error instead
+      # Should not raise in either failure mode
+      assert user.valid?
+
+      Nondisposable.configure { |c| c.on_check_failure = :reject }
       refute user.valid?
     end
+  end
+
+  def test_check_failure_mode_does_not_affect_normal_validation
+    setup_disposable_domain!("temp.com")
+
+    # :allow only applies to broken checks, not to actual disposable matches
+    user = User.new(email: "x@temp.com")
+    refute user.valid?
+
+    Nondisposable.configure { |c| c.on_check_failure = :reject }
+    user2 = User.new(email: "x@temp.com")
+    refute user2.valid?
+
+    good = User.new(email: "x@gmail.com")
+    assert good.valid?
   end
 
   # =========================================================================
