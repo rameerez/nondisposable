@@ -421,6 +421,126 @@ class DomainListUpdaterTest < NondisposableTestCase
   end
 
   # =========================================================================
+  # HTTP Timeout Tests
+  # =========================================================================
+
+  def test_fetch_uses_open_and_read_timeouts
+    captured_options = nil
+    fake_start = proc { |_host, _port, **options|
+      captured_options = options
+      raise Net::OpenTimeout, "execution expired"
+    }
+
+    Net::HTTP.stub(:start, fake_start) do
+      refute Nondisposable::DomainListUpdater.update
+    end
+
+    assert_equal Nondisposable::DomainListUpdater::OPEN_TIMEOUT, captured_options[:open_timeout]
+    assert_equal Nondisposable::DomainListUpdater::READ_TIMEOUT, captured_options[:read_timeout]
+    assert captured_options[:use_ssl]
+  end
+
+  def test_timeout_constants_are_ten_seconds
+    assert_equal 10, Nondisposable::DomainListUpdater::OPEN_TIMEOUT
+    assert_equal 10, Nondisposable::DomainListUpdater::READ_TIMEOUT
+  end
+
+  def test_returns_false_on_read_timeout
+    stub_request(:get, /disposable-email-domains/).to_raise(Net::ReadTimeout)
+
+    refute Nondisposable::DomainListUpdater.update
+  end
+
+  # =========================================================================
+  # Input Normalization Tests
+  # =========================================================================
+
+  def test_strips_carriage_returns_from_windows_line_endings
+    stub_domain_list("domain1.com\r\ndomain2.com\r\n")
+
+    Nondisposable::DomainListUpdater.update
+
+    names = Nondisposable::DisposableDomain.order(:name).pluck(:name)
+    assert_equal %w[domain1.com domain2.com], names
+  end
+
+  def test_strips_surrounding_whitespace_from_domains
+    stub_domain_list("domain.com  \n  another.com\n")
+
+    Nondisposable::DomainListUpdater.update
+
+    names = Nondisposable::DisposableDomain.order(:name).pluck(:name)
+    assert_equal %w[another.com domain.com], names
+  end
+
+  def test_drops_blank_lines_instead_of_inserting_empty_rows
+    stub_domain_list("domain1.com\n\n   \ndomain2.com\n\n")
+
+    Nondisposable::DomainListUpdater.update
+
+    assert_equal 2, Nondisposable::DisposableDomain.count
+    refute Nondisposable::DisposableDomain.exists?(name: "")
+  end
+
+  def test_deduplicates_case_variant_domains_after_normalization
+    stub_domain_list("Dupe.COM\ndupe.com\nother.com\n")
+
+    Nondisposable::DomainListUpdater.update
+
+    names = Nondisposable::DisposableDomain.order(:name).pluck(:name)
+    assert_equal %w[dupe.com other.com], names
+  end
+
+  def test_excluded_domains_match_case_insensitively
+    Nondisposable.configuration.excluded_domains = ["EXCLUDE.com"]
+    stub_domain_list("include.com\nexclude.com\n")
+
+    Nondisposable::DomainListUpdater.update
+
+    names = Nondisposable::DisposableDomain.pluck(:name)
+    assert_includes names, "include.com"
+    refute_includes names, "exclude.com"
+  end
+
+  # =========================================================================
+  # Skipped Row Reporting Tests
+  # =========================================================================
+
+  def test_logs_skipped_rows_when_bulk_insert_skips_conflicts
+    stub_domain_list("a.com\nb.com\n")
+    log_output = StringIO.new
+    old_logger = Rails.logger
+    Rails.logger = Logger.new(log_output)
+
+    # Simulate the unique index causing insert_all to skip one row
+    partial_insert = proc { |records, **|
+      Nondisposable::DisposableDomain.create!(name: records.first[:name])
+    }
+
+    Nondisposable::DisposableDomain.stub(:insert_all, partial_insert) do
+      assert Nondisposable::DomainListUpdater.update
+    end
+
+    assert_includes log_output.string, "Skipped 1 row(s)"
+    assert_includes log_output.string, "b.com"
+  ensure
+    Rails.logger = old_logger
+  end
+
+  def test_does_not_log_skipped_rows_on_clean_insert
+    stub_domain_list("a.com\nb.com\n")
+    log_output = StringIO.new
+    old_logger = Rails.logger
+    Rails.logger = Logger.new(log_output)
+
+    assert Nondisposable::DomainListUpdater.update
+
+    refute_includes log_output.string, "Skipped"
+  ensure
+    Rails.logger = old_logger
+  end
+
+  # =========================================================================
   # Logging Tests
   # =========================================================================
 
