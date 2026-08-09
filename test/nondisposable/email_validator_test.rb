@@ -384,6 +384,30 @@ class NondisposableValidatorTest < NondisposableTestCase
     assert user_allowed.valid?
   end
 
+  def test_email_at_subdomain_of_listed_domain_is_blocked
+    setup_disposable_domain!("tempmail.com")
+
+    refute User.new(email: "user@x.tempmail.com").valid?
+    refute User.new(email: "user@deep.x.tempmail.com").valid?
+    refute User.new(email: "user@tempmail.com").valid?
+  end
+
+  def test_email_at_subdomain_allowed_when_parent_matching_disabled
+    setup_disposable_domain!("tempmail.com")
+    Nondisposable.configuration.check_parent_domains = false
+
+    assert User.new(email: "user@x.tempmail.com").valid?
+    refute User.new(email: "user@tempmail.com").valid?
+  end
+
+  def test_email_at_unrelated_lookalike_domain_is_not_blocked
+    setup_disposable_domain!("tempmail.com")
+
+    # Suffix similarity is not parenthood
+    assert User.new(email: "user@nottempmail.com").valid?
+    assert User.new(email: "user@tempmail.com.evil.org").valid?
+  end
+
   def test_email_with_very_long_local_part
     setup_disposable_domain!("tempmail.com")
     long_local = "a" * 200

@@ -12,4 +12,8 @@ Nondisposable.configure do |config|
   #   :allow  - let the signup through and log an error (availability-first, default)
   #   :reject - block the signup with a validation error (fail closed)
   # config.on_check_failure = :allow
+  #
+  # Also match parent domains: an email at x.tempmail.com is blocked when
+  # tempmail.com is on the list (checks up to 3 parent labels). Default: true
+  # config.check_parent_domains = true
 end

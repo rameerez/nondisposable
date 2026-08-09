@@ -13,6 +13,12 @@ class ConfigurationTest < NondisposableTestCase
     assert_equal [], config.additional_domains
     assert_equal [], config.excluded_domains
     assert_equal :allow, config.on_check_failure
+    assert_equal true, config.check_parent_domains
+  end
+
+  def test_check_parent_domains_can_be_disabled
+    Nondisposable.configure { |c| c.check_parent_domains = false }
+    assert_equal false, Nondisposable.configuration.check_parent_domains
   end
 
   def test_configuration_attributes_are_accessible

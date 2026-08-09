@@ -34,6 +34,10 @@ module Nondisposable
     ON_CHECK_FAILURE_MODES = [:allow, :reject].freeze
 
     attr_accessor :error_message, :additional_domains, :excluded_domains
+    # Whether to also match parent domains: with the default true, an email at
+    # x.tempmail.com is blocked when tempmail.com is on the list (checks up to
+    # DisposableDomain::PARENT_MATCH_DEPTH parent labels, never a bare TLD).
+    attr_accessor :check_parent_domains
     attr_reader :on_check_failure
 
     def initialize
@@ -41,6 +45,7 @@ module Nondisposable
       @additional_domains = []
       @excluded_domains = []
       @on_check_failure = :allow
+      @check_parent_domains = true
     end
 
     # What the validator does when the disposable check itself raises
