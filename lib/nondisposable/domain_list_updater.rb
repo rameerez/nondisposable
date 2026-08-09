@@ -1,19 +1,27 @@
 # frozen_string_literal: true
 
-require 'open-uri'
 require 'net/http'
+require 'uri'
 
 module Nondisposable
   class DomainListUpdater
 
+    LIST_URL = 'https://raw.githubusercontent.com/disposable-email-domains/disposable-email-domains/master/disposable_email_blocklist.conf'
+
+    # Snapshot of the upstream blocklist vendored into the gem, used to seed
+    # fresh installs so they are protected before the first remote update.
+    BUNDLED_LIST_PATH = File.expand_path('../../data/disposable_email_blocklist.conf', __dir__)
+
+    # Network timeouts (seconds). Without these, a hung connection would block
+    # the calling job/thread indefinitely (Net::HTTP defaults to 60s open / 60s read).
+    OPEN_TIMEOUT = 10
+    READ_TIMEOUT = 10
+
     def self.update
       Rails.logger.info "[nondisposable] Refreshing list of disposable domains..."
 
-      url = 'https://raw.githubusercontent.com/disposable-email-domains/disposable-email-domains/master/disposable_email_blocklist.conf'
-
       begin
-        uri = URI(url)
-        response = Net::HTTP.get_response(uri)
+        response = fetch_list
 
         if response.is_a?(Net::HTTPSuccess)
           downloaded_domains = response.body.split("\n")
@@ -21,29 +29,98 @@ module Nondisposable
 
           Rails.logger.info "[nondisposable] Downloaded list of disposable domains..."
 
-          domains = (downloaded_domains + Nondisposable.configuration.additional_domains).uniq
-          domains -= Nondisposable.configuration.excluded_domains
-
-          ActiveRecord::Base.transaction do
-            Rails.logger.info "[nondisposable] Updating disposable domains..."
-            Nondisposable::DisposableDomain.delete_all
-
-            domains.each { |domain| Nondisposable::DisposableDomain.create(name: domain.downcase) }
-          end
-
-          Rails.logger.info "[nondisposable] Finished updating disposable domains. Total domains: #{domains.count}"
+          replace_domains(downloaded_domains)
           true
         else
           Rails.logger.error "[nondisposable] Failed to download the list. HTTP Status: #{response.code}"
+          seed
           false
         end
       rescue SocketError => e
         Rails.logger.error "[nondisposable] Network error occurred: #{e.message}"
+        seed
         false
       rescue StandardError => e
         Rails.logger.error "[nondisposable] An error occurred when trying to update the list of disposable domains: #{e.message}"
+        seed
         false
       end
     end
+
+    # Seeds the domain table from the blocklist snapshot bundled with the gem,
+    # but ONLY when the table is empty. This closes the fresh-install fail-open
+    # window where every email passed validation until the first successful
+    # remote update. Returns true if it seeded, false otherwise.
+    #
+    # The bundled list is a snapshot from the gem's release date — always run
+    # DomainListUpdater.update (e.g. via the provided job) to stay current.
+    def self.seed
+      return false unless Nondisposable::DisposableDomain.none?
+
+      Rails.logger.info "[nondisposable] Domain table is empty; seeding from the blocklist bundled with the gem..."
+      count = replace_domains(bundled_domains)
+      Rails.logger.info "[nondisposable] Seeded #{count} disposable domains from the bundled snapshot. Run Nondisposable::DomainListUpdater.update to fetch the latest list."
+      true
+    rescue StandardError => e
+      Rails.logger.error "[nondisposable] Could not seed from the bundled list: #{e.message}"
+      false
+    end
+
+    def self.bundled_domains
+      File.readlines(BUNDLED_LIST_PATH, chomp: true)
+    end
+    private_class_method :bundled_domains
+
+    def self.fetch_list
+      uri = URI(LIST_URL)
+      Net::HTTP.start(
+        uri.host,
+        uri.port,
+        use_ssl: uri.scheme == 'https',
+        open_timeout: OPEN_TIMEOUT,
+        read_timeout: READ_TIMEOUT
+      ) do |http|
+        http.get(uri.request_uri)
+      end
+    end
+    private_class_method :fetch_list
+
+    # Atomically replaces the stored domain list with the given raw list,
+    # merged with `additional_domains` and minus `excluded_domains`.
+    # Reports (instead of silently swallowing) any rows the bulk insert skipped.
+    def self.replace_domains(raw_domains)
+      domains = normalize(raw_domains + Nondisposable.configuration.additional_domains)
+      domains -= normalize(Nondisposable.configuration.excluded_domains)
+
+      inserted_count = 0
+
+      ActiveRecord::Base.transaction do
+        Rails.logger.info "[nondisposable] Updating disposable domains..."
+        Nondisposable::DisposableDomain.delete_all
+
+        records = domains.map { |domain| { name: domain } }
+        Nondisposable::DisposableDomain.insert_all(records, record_timestamps: true) if records.any?
+        inserted_count = Nondisposable::DisposableDomain.count
+      end
+
+      skipped_count = domains.size - inserted_count
+      if skipped_count.positive?
+        skipped = domains - Nondisposable::DisposableDomain.where(name: domains).pluck(:name)
+        preview = skipped.take(20).join(', ')
+        preview += ", … (#{skipped.size - 20} more)" if skipped.size > 20
+        Rails.logger.warn "[nondisposable] Skipped #{skipped_count} row(s) during bulk insert (duplicate or conflicting values): #{preview}"
+      end
+
+      Rails.logger.info "[nondisposable] Finished updating disposable domains. Total domains: #{inserted_count}"
+      inserted_count
+    end
+    private_class_method :replace_domains
+
+    # Downcases, strips whitespace (including stray \r from CRLF payloads),
+    # drops blank lines, and dedupes.
+    def self.normalize(domains)
+      domains.map { |domain| domain.to_s.strip.downcase }.reject(&:empty?).uniq
+    end
+    private_class_method :normalize
   end
 end

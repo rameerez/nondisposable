@@ -7,6 +7,15 @@ class CreateNondisposableDisposableDomains < ActiveRecord::Migration<%= migratio
 
       t.timestamps
     end
+
+    reversible do |dir|
+      dir.up do
+        # Seed from the blocklist snapshot bundled with the gem so the app is
+        # protected immediately, before the first remote update runs.
+        # Guarded so this migration still runs if the gem is ever removed.
+        Nondisposable::DomainListUpdater.seed if defined?(Nondisposable::DomainListUpdater)
+      end
+    end
   end
 
   private

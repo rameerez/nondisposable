@@ -12,6 +12,13 @@ class ConfigurationTest < NondisposableTestCase
     assert_equal "provider is not allowed", config.error_message
     assert_equal [], config.additional_domains
     assert_equal [], config.excluded_domains
+    assert_equal :allow, config.on_check_failure
+    assert_equal true, config.check_parent_domains
+  end
+
+  def test_check_parent_domains_can_be_disabled
+    Nondisposable.configure { |c| c.check_parent_domains = false }
+    assert_equal false, Nondisposable.configuration.check_parent_domains
   end
 
   def test_configuration_attributes_are_accessible
@@ -94,6 +101,42 @@ class ConfigurationTest < NondisposableTestCase
     # Both settings should be preserved
     assert_equal "first", Nondisposable.configuration.error_message
     assert_equal ["test.com"], Nondisposable.configuration.additional_domains
+  end
+
+  # =========================================================================
+  # on_check_failure Configuration Tests
+  # =========================================================================
+
+  def test_on_check_failure_defaults_to_allow
+    assert_equal :allow, Nondisposable.configuration.on_check_failure
+  end
+
+  def test_on_check_failure_accepts_reject
+    Nondisposable.configure { |c| c.on_check_failure = :reject }
+    assert_equal :reject, Nondisposable.configuration.on_check_failure
+  end
+
+  def test_on_check_failure_accepts_allow
+    Nondisposable.configure { |c| c.on_check_failure = :allow }
+    assert_equal :allow, Nondisposable.configuration.on_check_failure
+  end
+
+  def test_on_check_failure_accepts_strings
+    Nondisposable.configure { |c| c.on_check_failure = "reject" }
+    assert_equal :reject, Nondisposable.configuration.on_check_failure
+  end
+
+  def test_on_check_failure_rejects_invalid_values
+    assert_raises(ArgumentError) do
+      Nondisposable.configure { |c| c.on_check_failure = :explode }
+    end
+
+    assert_raises(ArgumentError) do
+      Nondisposable.configure { |c| c.on_check_failure = nil }
+    end
+
+    # Configuration untouched by the failed assignments
+    assert_equal :allow, Nondisposable.configuration.on_check_failure
   end
 
   # =========================================================================

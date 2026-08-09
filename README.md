@@ -43,7 +43,7 @@ This will create the necessary migration file, initializer, and a job for schedu
 rails db:migrate
 ```
 
-Finally, populate the initial list of disposable domains:
+The migration also seeds the table from a snapshot of the disposable-domain list bundled with the gem, so your app is protected immediately. To fetch the very latest list, run:
 
 ```ruby
 Nondisposable::DomainListUpdater.update
@@ -94,8 +94,27 @@ Nondisposable.configure do |config|
   config.error_message = "provider is not allowed. Please use a non-disposable email address."
   config.additional_domains = ['custom-disposable-domain.com']
   config.excluded_domains = ['false-positive-domain.com']
+
+  # What to do when the disposable check itself fails (e.g. database hiccup):
+  #   :allow  - let the signup through and log an error (availability-first, default)
+  #   :reject - block the signup with a validation error (fail closed)
+  config.on_check_failure = :allow
+
+  # Also match parent domains: an email at x.tempmail.com is blocked when
+  # tempmail.com is on the list. Set to false for exact matches only.
+  config.check_parent_domains = true
 end
 ```
+
+#### Parent domain matching
+
+With `check_parent_domains` enabled (the default since 0.3.0), `user@x.tempmail.com` is blocked when `tempmail.com` is on the list. The check walks up to 3 parent labels (`a.b.c.tempmail.com` → `b.c.tempmail.com` → `c.tempmail.com` → `tempmail.com`) and never matches against bare TLDs like `com`. All candidates are checked in a single indexed query.
+
+This is a deliberately minimal, dependency-free approximation of "registrable domain" matching: the gem doesn't ship a full [public suffix list](https://publicsuffix.org), so it can't tell that `co.uk` is a public suffix — which is harmless in practice, because public suffixes don't appear on the blocklist. If you need to allowlist a specific subdomain under a listed parent, add the exact subdomain to `excluded_domains`; an exact exclusion always wins. Excluding a parent domain also unblocks its subdomains.
+
+#### Failure mode
+
+By default (`on_check_failure = :allow`), if the disposable check raises — say, the database is briefly unavailable — the signup goes through and an error is logged. This is availability-first: a broken check should not lock everyone out of signup. If you'd rather fail closed (reject signups whenever the check cannot run, as versions before 0.3.0 did), set `config.on_check_failure = :reject`.
 
 ### Direct Check
 
@@ -113,6 +132,8 @@ To manually update the list of disposable domains, run:
 ```ruby
 Nondisposable::DomainListUpdater.update
 ```
+
+The fetch uses 10-second open/read timeouts and replaces the whole table atomically. If the remote fetch fails and your table is empty (e.g. a fresh install without network access), the updater automatically seeds from the blocklist snapshot bundled with the gem so you're never left unprotected; you can also trigger that explicitly with `Nondisposable::DomainListUpdater.seed` (it only seeds an empty table, and never overwrites existing data).
 
 It's important you keep your disposable domain list up to date. `nondisposable` will read from the latest version of the [`disposable-email-domains`](https://github.com/disposable-email-domains/disposable-email-domains) list, which is typically updated every few days.
 

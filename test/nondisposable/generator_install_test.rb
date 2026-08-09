@@ -59,6 +59,15 @@ class InstallGeneratorTest < Rails::Generators::TestCase
     end
   end
 
+  def test_migration_seeds_from_bundled_list
+    run_generator
+
+    assert_migration "db/migrate/create_nondisposable_disposable_domains.rb" do |content|
+      assert_includes content, "Nondisposable::DomainListUpdater.seed"
+      assert_includes content, "defined?(Nondisposable::DomainListUpdater)"
+    end
+  end
+
   def test_migration_has_timestamps
     run_generator
 

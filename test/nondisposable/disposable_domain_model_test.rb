@@ -266,7 +266,97 @@ class DisposableDomainModelTest < NondisposableTestCase
   def test_disposable_query_with_subdomain
     setup_disposable_domain!("mail.tempmail.com")
     assert Nondisposable::DisposableDomain.disposable?("mail.tempmail.com")
+    # Parent matching only walks UP the hierarchy, never down
     refute Nondisposable::DisposableDomain.disposable?("tempmail.com")
+  end
+
+  # =========================================================================
+  # Parent Domain (Registrable Domain) Matching Tests
+  # =========================================================================
+
+  def test_subdomain_of_listed_domain_is_disposable
+    setup_disposable_domain!("tempmail.com")
+
+    assert Nondisposable::DisposableDomain.disposable?("x.tempmail.com")
+    assert Nondisposable::DisposableDomain.disposable?("a.b.tempmail.com")
+    assert Nondisposable::DisposableDomain.disposable?("a.b.c.tempmail.com")
+  end
+
+  def test_parent_walk_is_capped_at_three_labels
+    setup_disposable_domain!("tempmail.com")
+
+    # Four levels of nesting escapes the walk — documented depth trade-off
+    refute Nondisposable::DisposableDomain.disposable?("a.b.c.d.tempmail.com")
+    assert_equal 3, Nondisposable::DisposableDomain::PARENT_MATCH_DEPTH
+  end
+
+  def test_parent_walk_matches_intermediate_parents
+    setup_disposable_domain!("evil.co.uk")
+
+    assert Nondisposable::DisposableDomain.disposable?("mail.evil.co.uk")
+    assert Nondisposable::DisposableDomain.disposable?("a.mail.evil.co.uk")
+  end
+
+  def test_parent_walk_never_queries_bare_tlds
+    # Even if a bare TLD somehow ends up in the table, walking from a
+    # two-label domain must not reach it
+    Nondisposable::DisposableDomain.insert_all([{ name: "com" }], record_timestamps: true)
+
+    refute Nondisposable::DisposableDomain.disposable?("example.com")
+  end
+
+  def test_parent_matching_can_be_disabled
+    setup_disposable_domain!("tempmail.com")
+    Nondisposable.configuration.check_parent_domains = false
+
+    refute Nondisposable::DisposableDomain.disposable?("x.tempmail.com")
+    assert Nondisposable::DisposableDomain.disposable?("tempmail.com")
+  end
+
+  def test_parent_matching_applies_to_additional_domains
+    Nondisposable.configuration.additional_domains = ["custom-disposable.com"]
+
+    assert Nondisposable::DisposableDomain.disposable?("sub.custom-disposable.com")
+  end
+
+  def test_exact_exclusion_allowlists_a_subdomain_of_a_listed_parent
+    setup_disposable_domain!("tempmail.com")
+    Nondisposable.configuration.excluded_domains = ["good.tempmail.com"]
+
+    refute Nondisposable::DisposableDomain.disposable?("good.tempmail.com")
+    # Other subdomains and the parent itself stay blocked
+    assert Nondisposable::DisposableDomain.disposable?("other.tempmail.com")
+    assert Nondisposable::DisposableDomain.disposable?("tempmail.com")
+  end
+
+  def test_excluding_a_parent_unblocks_its_subdomains
+    setup_disposable_domain!("tempmail.com")
+    Nondisposable.configuration.excluded_domains = ["tempmail.com"]
+
+    refute Nondisposable::DisposableDomain.disposable?("tempmail.com")
+    refute Nondisposable::DisposableDomain.disposable?("x.tempmail.com")
+  end
+
+  def test_excluded_domains_now_match_case_insensitively
+    setup_disposable_domain!("bad.com")
+    Nondisposable.configuration.excluded_domains = ["BAD.COM"]
+
+    refute Nondisposable::DisposableDomain.disposable?("bad.com")
+  end
+
+  def test_additional_domains_now_match_case_insensitively
+    Nondisposable.configuration.additional_domains = ["MixedCase.COM"]
+
+    assert Nondisposable::DisposableDomain.disposable?("mixedcase.com")
+  end
+
+  def test_match_candidates_shape
+    assert_equal ["tempmail.com"],
+                 Nondisposable::DisposableDomain.match_candidates("tempmail.com")
+    assert_equal ["a.b.c.tempmail.com", "b.c.tempmail.com", "c.tempmail.com", "tempmail.com"],
+                 Nondisposable::DisposableDomain.match_candidates("a.b.c.tempmail.com")
+    assert_equal ["localhost"],
+                 Nondisposable::DisposableDomain.match_candidates("localhost")
   end
 
   def test_disposable_query_with_punycode_domain

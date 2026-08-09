@@ -181,18 +181,19 @@ class DomainListUpdaterTest < NondisposableTestCase
   # HTTP Failure Tests
   # =========================================================================
 
-  def test_returns_false_on_http_404
+  def test_returns_false_on_http_404_but_seeds_empty_table_from_bundled_list
     stub_domain_list("", status: 404)
 
     refute Nondisposable::DomainListUpdater.update
-    assert_equal 0, Nondisposable::DisposableDomain.count
+    # Failure with an empty table falls back to the bundled snapshot
+    assert_operator Nondisposable::DisposableDomain.count, :>, 1000
   end
 
-  def test_returns_false_on_http_500
+  def test_returns_false_on_http_500_but_seeds_empty_table_from_bundled_list
     stub_domain_list("", status: 500)
 
     refute Nondisposable::DomainListUpdater.update
-    assert_equal 0, Nondisposable::DisposableDomain.count
+    assert_operator Nondisposable::DisposableDomain.count, :>, 1000
   end
 
   def test_returns_false_on_http_503
@@ -222,11 +223,12 @@ class DomainListUpdaterTest < NondisposableTestCase
   # Empty List Tests
   # =========================================================================
 
-  def test_returns_false_on_empty_list
+  def test_returns_false_on_empty_list_but_seeds_empty_table_from_bundled_list
     stub_domain_list("")
 
     refute Nondisposable::DomainListUpdater.update
-    assert_equal 0, Nondisposable::DisposableDomain.count
+    # Failure with an empty table falls back to the bundled snapshot
+    assert_operator Nondisposable::DisposableDomain.count, :>, 1000
   end
 
   def test_returns_false_on_whitespace_only_list
@@ -249,11 +251,12 @@ class DomainListUpdaterTest < NondisposableTestCase
   # Network Error Tests
   # =========================================================================
 
-  def test_returns_false_on_socket_error
+  def test_returns_false_on_socket_error_but_seeds_empty_table_from_bundled_list
     stub_request(:get, /disposable-email-domains/).to_raise(SocketError.new("no network"))
 
     refute Nondisposable::DomainListUpdater.update
-    assert_equal 0, Nondisposable::DisposableDomain.count
+    # Failure with an empty table falls back to the bundled snapshot
+    assert_operator Nondisposable::DisposableDomain.count, :>, 1000
   end
 
   def test_returns_false_on_timeout_error
@@ -309,7 +312,7 @@ class DomainListUpdaterTest < NondisposableTestCase
     setup_disposable_domain!("keep.com")
     stub_domain_list("a.com\n")
 
-    Nondisposable::DisposableDomain.stub(:create, proc { raise "insert failed" }) do
+    Nondisposable::DisposableDomain.stub(:insert_all, proc { raise "insert failed" }) do
       refute Nondisposable::DomainListUpdater.update
     end
 
@@ -317,21 +320,17 @@ class DomainListUpdaterTest < NondisposableTestCase
     assert_equal %w[keep.com], Nondisposable::DisposableDomain.order(:name).pluck(:name)
   end
 
-  def test_rollback_on_partial_insert_failure
+  def test_insert_all_is_atomic
     setup_disposable_domain!("original.com")
     stub_domain_list("new1.com\nnew2.com\n")
 
-    call_count = 0
-    Nondisposable::DisposableDomain.stub(:create, proc { |args|
-      call_count += 1
-      raise "fail on second" if call_count > 1
-      Nondisposable::DisposableDomain.new(args).tap(&:save!)
-    }) do
-      Nondisposable::DomainListUpdater.update
-    end
+    # With insert_all, the entire insert is a single operation
+    # This test verifies that bulk insert replaces all data correctly
+    Nondisposable::DomainListUpdater.update
 
-    # Due to transaction, original data should be preserved
-    # Note: actual behavior depends on error handling in update method
+    names = Nondisposable::DisposableDomain.order(:name).pluck(:name)
+    assert_equal %w[new1.com new2.com], names
+    refute_includes names, "original.com"
   end
 
   # =========================================================================
@@ -422,6 +421,202 @@ class DomainListUpdaterTest < NondisposableTestCase
     # Current behavior may include whitespace
     count = Nondisposable::DisposableDomain.count
     assert count >= 1
+  end
+
+  # =========================================================================
+  # Bundled Seed List Tests
+  # =========================================================================
+
+  def test_bundled_list_file_ships_with_the_gem
+    assert File.exist?(Nondisposable::DomainListUpdater::BUNDLED_LIST_PATH),
+           "Expected bundled blocklist at #{Nondisposable::DomainListUpdater::BUNDLED_LIST_PATH}"
+  end
+
+  def test_bundled_list_contains_thousands_of_clean_domains
+    lines = File.readlines(Nondisposable::DomainListUpdater::BUNDLED_LIST_PATH, chomp: true)
+
+    assert_operator lines.size, :>, 1000
+    assert lines.all? { |l| l == l.strip.downcase && !l.empty? }, "Bundled list should be normalized"
+    assert_includes lines, "mailinator.com"
+  end
+
+  def test_seed_populates_empty_table_from_bundled_list
+    assert_equal 0, Nondisposable::DisposableDomain.count
+
+    assert Nondisposable::DomainListUpdater.seed
+
+    bundled_size = File.readlines(Nondisposable::DomainListUpdater::BUNDLED_LIST_PATH, chomp: true).uniq.size
+    assert_equal bundled_size, Nondisposable::DisposableDomain.count
+    assert Nondisposable::DisposableDomain.exists?(name: "mailinator.com")
+  end
+
+  def test_seed_is_a_noop_when_table_is_populated
+    setup_disposable_domain!("existing.com")
+
+    refute Nondisposable::DomainListUpdater.seed
+
+    assert_equal 1, Nondisposable::DisposableDomain.count
+    assert Nondisposable::DisposableDomain.exists?(name: "existing.com")
+  end
+
+  def test_seed_respects_additional_and_excluded_domains
+    Nondisposable.configuration.additional_domains = ["my-custom-disposable.com"]
+    Nondisposable.configuration.excluded_domains = ["mailinator.com"]
+
+    assert Nondisposable::DomainListUpdater.seed
+
+    assert Nondisposable::DisposableDomain.exists?(name: "my-custom-disposable.com")
+    refute Nondisposable::DisposableDomain.exists?(name: "mailinator.com")
+  end
+
+  def test_seed_returns_false_when_bundled_list_is_unreadable
+    missing_path = "/nonexistent/path/blocklist.conf"
+    Nondisposable::DomainListUpdater.stub(:bundled_domains, proc { File.readlines(missing_path) }) do
+      refute Nondisposable::DomainListUpdater.seed
+    end
+
+    assert_equal 0, Nondisposable::DisposableDomain.count
+  end
+
+  def test_update_failure_does_not_reseed_populated_table
+    setup_disposable_domain!("existing.com")
+    stub_domain_list("", status: 500)
+
+    refute Nondisposable::DomainListUpdater.update
+
+    # Populated table is left untouched — no bundled fallback overwrite
+    assert_equal 1, Nondisposable::DisposableDomain.count
+    assert Nondisposable::DisposableDomain.exists?(name: "existing.com")
+  end
+
+  def test_successful_update_replaces_seeded_data
+    Nondisposable::DomainListUpdater.seed
+    assert_operator Nondisposable::DisposableDomain.count, :>, 1000
+
+    stub_domain_list("fresh.com\n")
+    assert Nondisposable::DomainListUpdater.update
+
+    assert_equal ["fresh.com"], Nondisposable::DisposableDomain.pluck(:name)
+  end
+
+  # =========================================================================
+  # HTTP Timeout Tests
+  # =========================================================================
+
+  def test_fetch_uses_open_and_read_timeouts
+    captured_options = nil
+    fake_start = proc { |_host, _port, **options|
+      captured_options = options
+      raise Net::OpenTimeout, "execution expired"
+    }
+
+    Net::HTTP.stub(:start, fake_start) do
+      refute Nondisposable::DomainListUpdater.update
+    end
+
+    assert_equal Nondisposable::DomainListUpdater::OPEN_TIMEOUT, captured_options[:open_timeout]
+    assert_equal Nondisposable::DomainListUpdater::READ_TIMEOUT, captured_options[:read_timeout]
+    assert captured_options[:use_ssl]
+  end
+
+  def test_timeout_constants_are_ten_seconds
+    assert_equal 10, Nondisposable::DomainListUpdater::OPEN_TIMEOUT
+    assert_equal 10, Nondisposable::DomainListUpdater::READ_TIMEOUT
+  end
+
+  def test_returns_false_on_read_timeout
+    stub_request(:get, /disposable-email-domains/).to_raise(Net::ReadTimeout)
+
+    refute Nondisposable::DomainListUpdater.update
+  end
+
+  # =========================================================================
+  # Input Normalization Tests
+  # =========================================================================
+
+  def test_strips_carriage_returns_from_windows_line_endings
+    stub_domain_list("domain1.com\r\ndomain2.com\r\n")
+
+    Nondisposable::DomainListUpdater.update
+
+    names = Nondisposable::DisposableDomain.order(:name).pluck(:name)
+    assert_equal %w[domain1.com domain2.com], names
+  end
+
+  def test_strips_surrounding_whitespace_from_domains
+    stub_domain_list("domain.com  \n  another.com\n")
+
+    Nondisposable::DomainListUpdater.update
+
+    names = Nondisposable::DisposableDomain.order(:name).pluck(:name)
+    assert_equal %w[another.com domain.com], names
+  end
+
+  def test_drops_blank_lines_instead_of_inserting_empty_rows
+    stub_domain_list("domain1.com\n\n   \ndomain2.com\n\n")
+
+    Nondisposable::DomainListUpdater.update
+
+    assert_equal 2, Nondisposable::DisposableDomain.count
+    refute Nondisposable::DisposableDomain.exists?(name: "")
+  end
+
+  def test_deduplicates_case_variant_domains_after_normalization
+    stub_domain_list("Dupe.COM\ndupe.com\nother.com\n")
+
+    Nondisposable::DomainListUpdater.update
+
+    names = Nondisposable::DisposableDomain.order(:name).pluck(:name)
+    assert_equal %w[dupe.com other.com], names
+  end
+
+  def test_excluded_domains_match_case_insensitively
+    Nondisposable.configuration.excluded_domains = ["EXCLUDE.com"]
+    stub_domain_list("include.com\nexclude.com\n")
+
+    Nondisposable::DomainListUpdater.update
+
+    names = Nondisposable::DisposableDomain.pluck(:name)
+    assert_includes names, "include.com"
+    refute_includes names, "exclude.com"
+  end
+
+  # =========================================================================
+  # Skipped Row Reporting Tests
+  # =========================================================================
+
+  def test_logs_skipped_rows_when_bulk_insert_skips_conflicts
+    stub_domain_list("a.com\nb.com\n")
+    log_output = StringIO.new
+    old_logger = Rails.logger
+    Rails.logger = Logger.new(log_output)
+
+    # Simulate the unique index causing insert_all to skip one row
+    partial_insert = proc { |records, **|
+      Nondisposable::DisposableDomain.create!(name: records.first[:name])
+    }
+
+    Nondisposable::DisposableDomain.stub(:insert_all, partial_insert) do
+      assert Nondisposable::DomainListUpdater.update
+    end
+
+    assert_includes log_output.string, "Skipped 1 row(s)"
+    assert_includes log_output.string, "b.com"
+  ensure
+    Rails.logger = old_logger
+  end
+
+  def test_does_not_log_skipped_rows_on_clean_insert
+    stub_domain_list("a.com\nb.com\n")
+    log_output = StringIO.new
+    old_logger = Rails.logger
+    Rails.logger = Logger.new(log_output)
+
+    assert Nondisposable::DomainListUpdater.update
+
+    refute_includes log_output.string, "Skipped"
+  ensure
+    Rails.logger = old_logger
   end
 
   # =========================================================================

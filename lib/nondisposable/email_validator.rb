@@ -14,8 +14,12 @@ module ActiveModel
             record.errors.add(attribute, options[:message] || Nondisposable.configuration.error_message)
           end
         rescue StandardError => e
-          Rails.logger.error "[nondisposable] Nondisposable validation error: #{e.message}"
-          record.errors.add(attribute, "is an invalid email address, cannot check if it's disposable")
+          if Nondisposable.configuration.on_check_failure == :reject
+            Rails.logger.error "[nondisposable] Nondisposable validation error: #{e.message} — rejecting #{attribute} (on_check_failure = :reject)"
+            record.errors.add(attribute, "is an invalid email address, cannot check if it's disposable")
+          else
+            Rails.logger.error "[nondisposable] Nondisposable validation error: #{e.message} — ALLOWING #{attribute} through without a disposable check (on_check_failure = :allow). Set config.on_check_failure = :reject to fail closed instead."
+          end
         end
       end
     end
