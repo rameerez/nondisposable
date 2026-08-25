@@ -17,6 +17,17 @@ That's it! You're done.
 
 The gem also provides a job you can run daily to keep your disposable domain list up to date.
 
+It can also catch the other kind of bad address — the typo. `user@gmail.con` isn't a throwaway, it's a real person whose account nobody will ever be able to reach, because `.con` doesn't exist. Two opt-in checks:
+
+```ruby
+Nondisposable.configure do |config|
+  config.check_tld = true                # reject TLDs that aren't in the IANA root zone
+  config.reject_lookalike_domains = true # and addresses one keystroke from a real provider
+end
+```
+
+See [Catching typos](#catching-typos).
+
 ## Installation
 
 Add this line to your application's Gemfile:
@@ -103,6 +114,23 @@ Nondisposable.configure do |config|
   # Also match parent domains: an email at x.tempmail.com is blocked when
   # tempmail.com is on the list. Set to false for exact matches only.
   config.check_parent_domains = true
+
+  # --- Catching typos (both OFF by default) ---
+
+  # Reject addresses whose TLD isn't in the IANA root zone: gmail.con, outlook.ed
+  config.check_tld = true
+  config.additional_tlds = []                # accept a TLD newer than this gem
+  config.blocked_tlds = %w[tk ml ga cf gq]   # refuse real TLDs you don't want
+  config.allowed_tlds = nil                  # or allowlist: %w[es com] rejects everything else
+
+  # Reject addresses one keystroke from a well-known provider: gmail.co, gmial.com
+  config.reject_lookalike_domains = false
+  config.lookalike_distance = 1              # edits that still count as a typo
+  config.additional_email_providers = []     # your own domains / regional providers
+
+  config.invalid_tld_error_message = "doesn't look like a real email address"
+  config.blocked_tld_error_message = "domain ending is not allowed"
+  config.lookalike_error_message = "looks like a typo. Did you mean %{suggestion}?"
 end
 ```
 
@@ -116,6 +144,81 @@ This is a deliberately minimal, dependency-free approximation of "registrable do
 
 By default (`on_check_failure = :allow`), if the disposable check raises — say, the database is briefly unavailable — the signup goes through and an error is logged. This is availability-first: a broken check should not lock everyone out of signup. If you'd rather fail closed (reject signups whenever the check cannot run, as versions before 0.3.0 did), set `config.on_check_failure = :reject`.
 
+### Catching typos
+
+A disposable address is someone hiding from you. A typo is someone who wanted to reach you and won't be able to. Both leave you with a useless row in the users table, so `nondisposable` can catch both — but the typo checks are **opt-in**, because upgrading a gem should never start rejecting addresses that were fine yesterday.
+
+#### `config.check_tld` — is that a real domain ending?
+
+Every TLD that exists is in the [IANA root zone database](https://data.iana.org/TLD/tlds-alpha-by-domain.txt), and the gem ships a snapshot of it (~1,438 entries, about 9 KB, loaded once into a frozen `Set`). `.con` has never been in it, and never will be.
+
+```ruby
+config.check_tld = true
+
+Nondisposable.valid_tld?("user@gmail.com")   # => true
+Nondisposable.valid_tld?("user@gmail.con")   # => false
+Nondisposable.valid_tld?("example@gmailmcom") # => false  (no TLD at all)
+```
+
+Details worth knowing:
+
+- **No dot, no TLD.** `example@gmailmcom` models a typo observed in production: the dot was missed entirely. A domain with no TLD can't end in a real one, so it's rejected. If your app accepts single-label intranet addresses like `you@localhost`, leave this off for that model.
+- **IP literals are left alone.** `user@192.168.0.1` and `user@[10.0.0.1]` are a format question, and a TLD check has no business answering it. Pair with `format:` if you care.
+- **Unicode TLDs are never rejected.** IANA lists internationalised TLDs in punycode (`XN--FIQS8S`), and converting `例え.テスト` to that form needs an IDN library this gem deliberately doesn't depend on. Rather than reject every unicode address, it declines to judge them. Punycode-form addresses — what mail clients actually send — are checked normally.
+- **A stale snapshot can't trap you.** If ICANN delegates a TLD after your gem version shipped, `config.additional_tlds = %w[newtld]` accepts it immediately, with no release to wait for.
+
+> [!IMPORTANT]
+> **`.test` and `.example` are rejected, and that will turn your test suite red.**
+>
+> RFC 6761 and RFC 2606 reserve `test`, `example`, `invalid` and `localhost` precisely so they can never be delegated — which is why they aren't in the root zone, and why your fixtures live at `user@example.test` in the first place. Rejecting them is right for a signup form (no human types `me@home.test`, and mail could never be delivered there), but it's a configuration question, not a bug:
+>
+> ```ruby
+> # config/initializers/nondisposable.rb
+> config.additional_tlds = Nondisposable::Tld::SPECIAL_USE if Rails.env.local?
+> ```
+>
+> Scope it to your non-production environments, so production still refuses an address nobody could ever answer.
+
+`blocked_tlds` refuses TLDs that are perfectly real but that you'd rather not see — the historically free Freenom set (`tk`, `ml`, `ga`, `cf`, `gq`) is the usual suspect. `allowed_tlds` inverts it into an allowlist; be careful, `%w[es]` turns away every `.com` customer you have.
+
+#### `config.reject_lookalike_domains` — did they mean gmail.com?
+
+A TLD check structurally **cannot** catch the most common typos, because `.co` (Colombia), `.cm` (Cameroon) and `.om` (Oman) are all real, delegated TLDs. `user@gmail.co` is a well-formed address at a real TLD and still almost always a finger that slipped off the `m`.
+
+So the second check asks a different question: is this domain one edit away from a well-known provider, while not being one itself?
+
+```ruby
+Nondisposable.suggestion_for("someone@gmial.com") # => "someone@gmail.com"
+Nondisposable.suggestion_for("someone@gmail.co")  # => "someone@gmail.com"
+Nondisposable.suggestion_for("someone@gmail.com") # => nil
+Nondisposable.suggestion_for("someone@mail.com")  # => nil  (a real provider)
+```
+
+`suggestion_for` is always available and **never blocks anything** — show it as a hint and let the human decide. That's the gentler way to use this, and the one to reach for first:
+
+```erb
+<% if (did_you_mean = Nondisposable.suggestion_for(@user.email)) %>
+  <p>Did you mean <%= did_you_mean %>?</p>
+<% end %>
+```
+
+Setting `reject_lookalike_domains = true` turns the same guess into a validation error naming the correction. Do that deliberately: a suggestion is a guess about intent, and a wrong guess stops a real person signing up with their real address. Two things keep that rare — matching stops at **one** edit by default (`lookalike_distance`), and an exact match against the bundled provider list always wins, which is why that list includes awkward pairs like `mail.com` (one insertion from `gmail.com`). Add anything we've missed with `config.additional_email_providers`; doing so both makes it a suggestion candidate and stops its users being told they mistyped.
+
+The matching uses optimal string alignment distance rather than plain Levenshtein, so an adjacent swap counts as the one mistake a human actually made: `gmial.com` is distance 1, not 2.
+
+#### How the two combine
+
+At most one error is added, however many checks fire — and whenever the gem can name a correction, that phrasing wins:
+
+| Address | `check_tld` only | with `reject_lookalike_domains` |
+|---|---|---|
+| `user@gmail.con` | "looks like a typo. Did you mean user@gmail.com?" | same |
+| `user@zzz.con` | "doesn't look like a real email address" | same |
+| `user@gmail.co` | accepted | "looks like a typo. Did you mean user@gmail.com?" |
+| `user@tempmail.com` | "provider is not allowed" | same |
+
+"Doesn't look like a real email address" is true but useless when we know what they meant, so a nameable correction always outranks the generic message.
+
 ### Direct Check
 
 You can also check if an email is disposable directly:
@@ -123,6 +226,8 @@ You can also check if an email is disposable directly:
 ```ruby
 Nondisposable.disposable?('user@example.com') # => false
 Nondisposable.disposable?('user@disposable-email.com') # => true
+Nondisposable.valid_tld?('user@example.con')  # => false
+Nondisposable.suggestion_for('user@gmial.com') # => "user@gmail.com"
 ```
 
 ## Updating disposable domains
@@ -146,6 +251,24 @@ production:
     class: DisposableEmailDomainListUpdateJob
     queue: default
     schedule: every day at 3am US/Pacific
+```
+
+## Updating the TLD list
+
+The TLD snapshot is the deliberate opposite of the disposable list: it ships **inside the gem**, not in your database, and there is nothing for your app to schedule. Disposable domains number in the thousands and change every few days; TLDs are ~1,438 strings that change a handful of times a year, so a frozen `Set` costs one file read at boot, answers in O(1) with no query per signup, needs no migration, and can't be empty on a fresh install.
+
+If ICANN delegates a TLD your installed version doesn't know about, don't wait for a release — that's what `config.additional_tlds` is for.
+
+Maintainers refresh the snapshot from a checkout of this gem:
+
+```bash
+rake nondisposable:tlds:update   # rewrites data/iana_tlds.txt from data.iana.org
+```
+
+It refuses to overwrite a good list with an implausibly short one (a captive portal or a truncated body served with a `200`), writes to a temp file and moves it into place so an interrupted run can't leave half a root zone behind, and keeps IANA's own version header so you can always see which root zone you're shipping:
+
+```ruby
+Nondisposable::Tld.version # => "2026082301, Last Updated Mon Aug 24 07:07:01 2026 UTC"
 ```
 
 ## Troubleshooting
