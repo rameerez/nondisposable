@@ -25,8 +25,12 @@ module Nondisposable
 
     STATUSES = %w[ok rejected failed rolled_back].freeze
 
-    # Snapshots kept per source; the newest `ok` one is always kept on top.
+    # Rows kept per source: the newest RETAINED_PER_SOURCE of any status, plus
+    # the newest RETAINED_OK_PER_SOURCE good ones however old (failures must
+    # never evict the fallback, nor the shrink guard's baseline), plus EVERY
+    # rolled-back row (its sha256 is what refuses the same poison next time).
     RETAINED_PER_SOURCE = 5
+    RETAINED_OK_PER_SOURCE = 3
 
     validates :source, :status, :fetched_at, presence: true
     validates :status, inclusion: { in: STATUSES }
@@ -47,14 +51,11 @@ module Nondisposable
         ok.where(source: source_name).newest_first.first
       end
 
-      # Keeps the newest RETAINED_PER_SOURCE rows of a source, plus its newest
-      # ok row however old: the fallback a run of failures falls back TO must
-      # never be pruned by those failures.
       def prune(source_name)
-        keep = where(source: source_name).newest_first.limit(RETAINED_PER_SOURCE).pluck(:id)
-        good = last_good(source_name)
-        keep << good.id if good
-        where(source: source_name).where.not(id: keep).delete_all
+        rows = where(source: source_name)
+        keep = rows.newest_first.limit(RETAINED_PER_SOURCE).pluck(:id) +
+               rows.ok.newest_first.limit(RETAINED_OK_PER_SOURCE).pluck(:id)
+        rows.where.not(id: keep).where.not(status: 'rolled_back').delete_all
       end
     end
 

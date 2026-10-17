@@ -67,8 +67,15 @@ module Nondisposable
         additional = configured_set(config.additional_domains)
         return [:block, nil] if remaining.any? { |candidate| additional.include?(candidate) }
 
-        if namespace(domain).any? { |name| !excluded.include?(name) && privacy_relays.include?(name) }
-          return [config.block_privacy_relays ? :block : :allow, nil]
+        # The relay ALLOWANCE covers the whole relay namespace, whatever is
+        # excluded: adding an exclusion must never turn an allowed address into
+        # a refused one (filter drops every relay-namespace row the same way).
+        # Under block_privacy_relays an excluded relay name stops being a
+        # reason to block, like any other exclusion.
+        relay_names = namespace(domain).select { |name| privacy_relays.include?(name) }
+        if relay_names.any?
+          return [:allow, nil] unless config.block_privacy_relays
+          return [:block, nil] if relay_names.any? { |name| !excluded.include?(name) }
         end
 
         [:lookup, remaining]
@@ -152,14 +159,16 @@ module Nondisposable
         self
       end
 
-      # The domain and each of its parents down to two labels, skipping public
-      # suffixes: `a.b.rr.com` => ["a.b.rr.com", "b.rr.com", "rr.com"].
+      # The domain and each of its parents down to its registrable domain:
+      # `a.b.rr.com` => ["a.b.rr.com", "b.rr.com", "rr.com"]. Empty for a public
+      # suffix. Never climbs past the registrable domain, so `sch.uk` is not in
+      # the namespace of `school.county.sch.uk`.
       def namespace(domain)
+        registrable = PublicSuffix.registrable_domain(domain)
+        return [] unless registrable
+
         labels = domain.split('.')
-        (0..(labels.size - 2)).filter_map do |i|
-          name = labels.drop(i).join('.')
-          name unless PublicSuffix.public_suffix?(name)
-        end
+        (0..(labels.size - registrable.count('.') - 1)).map { |i| labels.drop(i).join('.') }
       end
 
       # The most specific name in `domain`'s namespace that `set` contains.

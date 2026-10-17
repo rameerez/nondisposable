@@ -150,16 +150,26 @@ class NondisposableMultiSourceUpdaterTest < NondisposableTestCase
     assert_includes failed.error, "500"
   end
 
-  def test_first_run_with_a_failing_primary_keeps_the_seed
+  def test_first_run_with_a_failing_bundled_primary_stands_in_the_bundled_list
     use_sources(DED, src("other"))
     stub_source(DED, "", status: 503)
     stub_source(src("other"), list("other.com"))
 
     log = capture_log { refute Updater.update }
 
+    assert_includes log, "using the list bundled with the gem in its place"
+    assert Nondisposable::DisposableDomain.exists?(name: "mailinator.com"), "the seed's domains are all still there"
+    assert Nondisposable::DisposableDomain.exists?(name: "other.com")
+  end
+
+  def test_first_run_with_a_never_fetched_primary_seeds_an_empty_table
+    a = src("a")
+    use_sources(a)
+    stub_source(a, "", status: 500)
+
+    log = capture_log { refute Updater.update }
     assert_includes log, "Not publishing"
-    assert Nondisposable::DisposableDomain.exists?(name: "mailinator.com"), "seeded from the bundled list"
-    refute Nondisposable::DisposableDomain.exists?(name: "other.com")
+    assert Nondisposable::DisposableDomain.exists?(name: "mailinator.com")
   end
 
   def test_first_run_with_a_failing_primary_keeps_an_existing_table
@@ -249,6 +259,21 @@ class NondisposableMultiSourceUpdaterTest < NondisposableTestCase
     assert_includes log, "from 100", "measured against the largest retained snapshot, not the last one"
   end
 
+  def test_failures_cannot_prune_away_the_shrink_baseline
+    a = src("a")
+    use_sources(a)
+    stub_source(a, list(many(100)))
+    assert Updater.update
+    stub_source(a, list(many(60)))
+    assert Updater.update
+    stub_source(a, "", status: 500)
+    (Snapshot::RETAINED_PER_SOURCE + 2).times { Updater.update }
+
+    stub_source(a, list(many(36)))
+    log = capture_log { refute Updater.update }
+    assert_includes log, "from 100"
+  end
+
   def test_sudden_growth_is_refused
     a = src("a")
     use_sources(a)
@@ -303,7 +328,8 @@ class NondisposableMultiSourceUpdaterTest < NondisposableTestCase
 
     assert_equal %w[temp.com], stored
     assert_match(/a lists 3 domain\(s\) known to be real providers/, log)
-    assert_equal 4, Snapshot.last_good("a").domain_count, "the snapshot records what the source said"
+    assert_equal 1, Snapshot.last_good("a").domain_count, "counts are of STORABLE domains"
+    assert_equal 4, Snapshot.last_good("a").domain_list.size, "the list records what the source said"
   end
 
   def test_public_suffixes_in_a_source_are_dropped_and_reported
@@ -325,8 +351,32 @@ class NondisposableMultiSourceUpdaterTest < NondisposableTestCase
     stub_source(a, list("gmail.com", "outlook.com"))
 
     log = capture_log { refute Updater.update }
-    assert_includes log, "Refusing to publish an empty list"
+    assert_includes log, "the list is empty", "real providers do not count towards a list's size"
     assert_equal %w[existing.com], stored
+  end
+
+  def test_a_payload_padded_with_public_suffixes_cannot_replace_the_seed
+    # codex: 6,000 suffix-shaped lines plus one employer used to pass every
+    # size guard against the 8,000-domain seed and publish just the employer.
+    Updater.seed
+    seeded = Nondisposable::DisposableDomain.count
+    padding = (1..6_000).map { |i| "x#{i}.sch.uk" } # each is a suffix via *.sch.uk
+    stub_source(DED, list(padding, "victim-employer.com"))
+
+    log = capture_log { refute Updater.update }
+    assert_includes log, "Refusing the new disposable-email-domains list"
+    assert_equal seeded, Nondisposable::DisposableDomain.count
+    refute Nondisposable::DisposableDomain.exists?(name: "victim-employer.com")
+  end
+
+  def test_a_publish_that_empties_out_on_an_empty_table_still_seeds
+    a = src("a")
+    use_sources(a)
+    Snapshot.create!(source: "a", status: "ok", fetched_at: Time.current, domain_count: 1, domains: "gmail.com")
+
+    log = capture_log { refute Updater.publish }
+    assert_includes log, "Refusing to publish an empty list"
+    assert Nondisposable::DisposableDomain.exists?(name: "mailinator.com")
   end
 
   # =========================================================================
@@ -388,6 +438,35 @@ class NondisposableMultiSourceUpdaterTest < NondisposableTestCase
     log = capture_log { refute Updater.update }
     assert_includes log, "identical to a snapshot that was rolled back"
     assert_equal %w[good.com], stored
+  end
+
+  def test_rolling_back_a_primarys_only_snapshot_withdraws_its_list
+    a = src("a")
+    b = src("b")
+    use_sources(a, b)
+    stub_source(a, list("a.com"))
+    stub_source(b, list("b.com", "victim-employer.com"))
+    assert Updater.update
+
+    assert Updater.rollback("b")
+    assert_equal %w[a.com], stored, "a poisoned primary must not stay published"
+  end
+
+  def test_rollback_quarantine_survives_pruning
+    a = src("a")
+    use_sources(a)
+    stub_source(a, list("good.com"))
+    assert Updater.update
+    stub_source(a, list("good.com", "victim-employer.com"))
+    assert Updater.update
+    assert Updater.rollback("a")
+
+    stub_source(a, "", status: 500)
+    (Snapshot::RETAINED_PER_SOURCE + 2).times { Updater.update }
+
+    stub_source(a, list("good.com", "victim-employer.com"))
+    log = capture_log { refute Updater.update }
+    assert_includes log, "identical to a snapshot that was rolled back"
   end
 
   def test_rollback_without_a_snapshot

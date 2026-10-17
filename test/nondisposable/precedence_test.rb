@@ -112,6 +112,29 @@ class NondisposablePrecedenceTest < NondisposableTestCase
     refute disposable?("x.tempmail.com")
   end
 
+  def test_names_above_a_wildcard_suffix_never_match_below_it
+    # codex: `sch.uk` is not itself a suffix, but `*.sch.uk` is, so every
+    # school.<county>.sch.uk belongs to someone else.
+    setup_disposable_domain!("sch.uk")
+    Nondisposable.configuration.additional_domains = ["sch.uk"]
+    refute disposable?("school.county.sch.uk")
+    assert_equal %w[school.county.sch.uk], Nondisposable::DisposableDomain.match_candidates("school.county.sch.uk")
+    assert_equal "school.county.sch.uk", Nondisposable::PublicSuffix.registrable_domain("school.county.sch.uk")
+    assert_equal "tempmail.com", Nondisposable::PublicSuffix.registrable_domain("a.b.tempmail.com")
+    assert_equal "city.kawasaki.jp", Nondisposable::PublicSuffix.registrable_domain("www.city.kawasaki.jp")
+    assert_nil Nondisposable::PublicSuffix.registrable_domain("co.uk")
+  end
+
+  def test_adding_an_exclusion_never_turns_an_allowed_relay_into_a_refusal
+    # codex: with a stored x.anonaddy.com, excluding anonaddy.com used to make
+    # validation BLOCK it while filter dropped the row. Parity both ways now.
+    setup_disposable_domain!("x.anonaddy.com")
+    assert_equal false, disposable?("x.anonaddy.com")
+    Nondisposable.configuration.excluded_domains = ["anonaddy.com"]
+    assert_equal false, disposable?("x.anonaddy.com")
+    assert_equal [], kept(%w[x.anonaddy.com])
+  end
+
   def test_public_suffix_rows_never_match
     Nondisposable::DisposableDomain.insert_all([{ name: "com.br" }, { name: "github.io" }], record_timestamps: true)
     Nondisposable.configuration.additional_domains = ["co.uk"]

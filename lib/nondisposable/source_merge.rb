@@ -9,17 +9,17 @@ module Nondisposable
   #           + every domain that at least `threshold` independent ORIGINS
   #             among the CORROBORATING sources list
   #
-  # An origin is a source whose vote is not explained by an upstream: for a
-  # domain listed by A and B, where A declares `derived_from: [B]`, only B
-  # counts. Lineage is followed transitively (groundcat → disposable →
-  # mailchecker), and only through sources that were actually loaded — an
-  # upstream we did not fetch cannot explain anything, so the downstream's vote
-  # stands.
+  # Votes are counted per INDEPENDENT ORIGIN. Two voters are RELATED when one
+  # declares the other as an upstream, or both declare a common upstream
+  # (transitively, including upstreams we did not load: two mirrors of the
+  # same unfetched list are one observation, not two). A domain's origin
+  # count is the largest set of pairwise-unrelated voters. A list that merely
+  # copies two independent lists does not make them related, and adds no vote.
   #
-  # Known blind spot, documented rather than guessed at: if an upstream REMOVES
-  # a domain (a fixed false positive) and a downstream still carries its stale
-  # copy, the copy now looks like an independent observation. With the default
-  # threshold of 2 that alone cannot block anything.
+  # Known blind spot: lineage is only what sources DECLARE. Two lists that copy
+  # each other silently (wesbos and mailchecker overlap by 57%) still look
+  # independent; that is why the recommended preset uses no corroborating
+  # sources at all.
   #
   # Pure: no database, no configuration, no logging. The precedence table is
   # applied afterwards (Nondisposable::Precedence.filter).
@@ -38,8 +38,7 @@ module Nondisposable
         primaries.each { |_, domains| blocked.merge(domains) }
         primary_count = blocked.size
 
-        names = snapshots.keys.map(&:name).to_set
-        ancestors = ancestry(snapshots.keys, names)
+        ancestors = ancestry(snapshots.keys)
 
         votes = Hash.new { |hash, key| hash[key] = [] }
         corroborating.each do |source, domains|
@@ -50,9 +49,7 @@ module Nondisposable
         votes.each do |domain, voters|
           next if voters.size < threshold # cannot reach it even before lineage
 
-          present = voters.to_set
-          origins = voters.count { |voter| !ancestors[voter].intersect?(present) }
-          next if origins < threshold
+          next if independent_origins(voters, ancestors).size < threshold
 
           blocked << domain
           corroborated += 1
@@ -63,17 +60,35 @@ module Nondisposable
 
       # How many independent origins vote for `domain`. For explaining a
       # verdict in a console, not used by #call's fast path.
+      # A largest set of pairwise-unrelated sources voting for `domain`
+      # (alphabetically first among ties). For explaining a verdict in a
+      # console; #call uses the same rule.
       def origins_for(domain, snapshots)
-        names = snapshots.keys.map(&:name).to_set
-        ancestors = ancestry(snapshots.keys, names)
-        present = snapshots.select { |_, domains| domains.include?(domain) }.keys.map(&:name).to_set
-        present.reject { |name| ancestors[name].intersect?(present) }.sort
+        voters = snapshots.select { |_, domains| domains.include?(domain) }.keys.map(&:name)
+        independent_origins(voters, ancestry(snapshots.keys))
       end
 
       private
 
-      # { source name => Set of every loaded upstream, transitively }.
-      def ancestry(sources, loaded)
+      # Brute force over subsets, largest first: there are only ever a handful
+      # of corroborating sources, and most domains have one or two voters.
+      def independent_origins(voters, ancestors)
+        voters = voters.sort
+        related = lambda do |a, b|
+          ancestors[a].include?(b) || ancestors[b].include?(a) || ancestors[a].intersect?(ancestors[b])
+        end
+
+        voters.size.downto(1) do |size|
+          voters.combination(size) do |subset|
+            return subset if subset.combination(2).none? { |a, b| related.call(a, b) }
+          end
+        end
+        []
+      end
+
+      # { source name => Set of every declared upstream, transitively,
+      # loaded or not }.
+      def ancestry(sources)
         declared = sources.to_h { |source| [source.name, source.derived_from] }
         declared.keys.to_h do |name|
           seen = Set.new
@@ -85,7 +100,7 @@ module Nondisposable
             seen << upstream
             stack.concat(declared.fetch(upstream, []))
           end
-          [name, seen & loaded]
+          [name, seen]
         end
       end
     end

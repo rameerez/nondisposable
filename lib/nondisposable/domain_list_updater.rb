@@ -98,9 +98,13 @@ module Nondisposable
           return false
         end
 
-        snapshot.update!(status: 'rolled_back')
-        log :warn, "Rolled back #{source_name} snapshot ##{snapshot.id} (#{snapshot.domain_count} domains, fetched #{snapshot.fetched_at})."
-        publish
+        with_publish_lock do
+          snapshot.update!(status: 'rolled_back')
+          log :warn, "Rolled back #{source_name} snapshot ##{snapshot.id} (#{snapshot.domain_count} domains, fetched #{snapshot.fetched_at})."
+          # A withdrawn source with no older good snapshot is simply left out:
+          # keeping its poisoned list published would defeat the rollback.
+          publish!(withdrawn: source_name.to_s)
+        end || false
       end
 
       # Seeds the domain table from the blocklist snapshot bundled with the gem,
@@ -145,28 +149,14 @@ module Nondisposable
       end
 
       # Fetches one source into a snapshot row. Never raises.
+      #
+      # The download happens outside the publish lock (it can take a while);
+      # judging it and recording the verdict happen inside, so a rollback or a
+      # publish can never interleave with a snapshot being accepted.
       def refresh(source)
         fetched_at = Time.current
         parsed = Source.parse(SourceFetcher.fetch(source))
-        sha256 = Digest::SHA256.hexdigest(parsed.domains.join("\n"))
-        previous = SourceSnapshot.last_good(source.name)
-
-        if (reason = guard(source, parsed, sha256, previous))
-          log :error, "Refusing the new #{source.name} list: #{reason}. Keeping its last good snapshot."
-          record(source, 'rejected', fetched_at, sha256: sha256, domain_count: parsed.domains.size, error: reason)
-          return false
-        end
-
-        if previous && previous.sha256 == sha256
-          previous.update!(fetched_at: fetched_at)
-          log :info, "#{source.name}: unchanged (#{parsed.domains.size} domains)."
-          return true
-        end
-
-        log_changes(source, previous, parsed)
-        log_poison(source, parsed.domains)
-        record(source, 'ok', fetched_at, sha256: sha256, domain_count: parsed.domains.size, domains: parsed.domains.join("\n"))
-        true
+        with_publish_lock { accept(source, parsed, fetched_at) } || false
       rescue StandardError => e
         log :error, "Could not fetch #{source.name} (#{source.url}): #{e.class}: #{e.message}. Keeping its last good snapshot."
         begin
@@ -177,15 +167,47 @@ module Nondisposable
         false
       ensure
         begin
-          SourceSnapshot.prune(source.name)
+          with_publish_lock { SourceSnapshot.prune(source.name) }
         rescue StandardError => e
           log :warn, "Could not prune old #{source.name} snapshots: #{e.message}"
         end
       end
 
-      # nil when the snapshot may be used, otherwise why not.
-      def guard(source, parsed, sha256, previous)
-        count = parsed.domains.size
+      def accept(source, parsed, fetched_at)
+        sha256 = Digest::SHA256.hexdigest(parsed.domains.join("\n"))
+        count = storable_count(parsed.domains)
+        previous = SourceSnapshot.last_good(source.name)
+
+        if (reason = guard(source, parsed, count, sha256, previous))
+          log :error, "Refusing the new #{source.name} list: #{reason}. Keeping its last good snapshot."
+          record(source, 'rejected', fetched_at, sha256: sha256, domain_count: count, error: reason)
+          return false
+        end
+
+        if previous && previous.sha256 == sha256
+          previous.update!(fetched_at: fetched_at)
+          log :info, "#{source.name}: unchanged (#{count} domains)."
+          return true
+        end
+
+        log_changes(source, previous, parsed)
+        log_poison(source, parsed.domains)
+        record(source, 'ok', fetched_at, sha256: sha256, domain_count: count, domains: parsed.domains.join("\n"))
+        true
+      end
+
+      # The domains of a list that could ever be stored: not junk, not a public
+      # suffix, not a known real provider. Every size guard counts THESE, so a
+      # payload padded with suffixes or real providers cannot pass for a full
+      # list (6,000 `*.com.br`-style lines plus one employer is one domain).
+      def storable_count(domains)
+        never = Precedence.never_disposable
+        domains.count { |domain| Precedence.invalid_reason(domain).nil? && !Precedence.namespace_hit(domain, never) }
+      end
+
+      # nil when the snapshot may be used, otherwise why not. `count` is the
+      # storable count (see #storable_count); snapshot domain_counts are too.
+      def guard(source, parsed, count, sha256, previous)
         return 'the list is empty' if count.zero?
 
         if parsed.invalid_ratio > Source::MAX_INVALID_RATIO
@@ -214,14 +236,14 @@ module Nondisposable
       def bundled_count(source)
         return nil unless source.bundled_path && File.exist?(source.bundled_path)
 
-        Source.parse(File.read(source.bundled_path)).domains.size
+        storable_count(Source.parse(File.read(source.bundled_path)).domains)
       end
 
       def record(source, status, fetched_at, **attributes)
         SourceSnapshot.create!(source: source.name, url: source.url, status: status, fetched_at: fetched_at, **attributes)
       end
 
-      def publish!
+      def publish!(withdrawn: nil)
         snapshots = {}
         missing_primaries = []
 
@@ -229,6 +251,11 @@ module Nondisposable
           snapshot = SourceSnapshot.last_good(source.name)
           if snapshot
             snapshots[source] = snapshot.domain_list
+          elsif source.name == withdrawn
+            log :warn, "#{source.name} has no good snapshot left after the rollback; building the list without it."
+          elsif source.primary? && source.bundled_path
+            log :warn, "#{source.name} has no good snapshot yet; using the list bundled with the gem in its place."
+            snapshots[source] = Source.parse(File.read(source.bundled_path)).domains
           elsif source.primary?
             missing_primaries << source.name
           else
@@ -245,7 +272,9 @@ module Nondisposable
 
         merged = SourceMerge.call(snapshots, threshold: Nondisposable.configuration.corroboration_threshold)
         log :info, "Merged #{snapshots.size} source(s): #{merged.primary_count} from primaries, #{merged.corroborated_count} corroborated."
-        publish_domains(merged.domains)
+        published = publish_domains(merged.domains)
+        seed! unless published
+        published
       end
 
       # ---- Single-source path (no snapshots table) ------------------------
@@ -310,12 +339,18 @@ module Nondisposable
       # Replaces the stored list with `domains` in one transaction, writing only
       # the difference: readers see the old list or the new one, never a gap.
       # Reports (instead of silently swallowing) any rows the bulk insert skipped.
+      #
+      # The current list is read INSIDE the transaction, so the diff is taken
+      # against what this transaction will overwrite. On SQLite a concurrent
+      # writer then makes this one fail (SQLITE_BUSY) instead of merging two
+      # stale diffs; on PostgreSQL/MySQL the publish lock already serializes us.
       def write_domains(domains)
-        current = DisposableDomain.pluck(:name).to_set
-        added = (domains - current).to_a.sort
-        removed = (current - domains).to_a.sort
+        current = added = removed = nil
 
         ActiveRecord::Base.transaction do
+          current = DisposableDomain.pluck(:name).to_set
+          added = (domains - current).to_a.sort
+          removed = (current - domains).to_a.sort
           log :info, 'Updating disposable domains...'
           removed.each_slice(INSERT_BATCH_SIZE) { |batch| DisposableDomain.where(name: batch).delete_all }
           added.each_slice(INSERT_BATCH_SIZE) do |batch|

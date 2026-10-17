@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'net/http'
+require 'timeout'
 require 'uri'
 
 module Nondisposable
@@ -24,27 +25,32 @@ module Nondisposable
         started = monotonic
         body = +''
 
-        Net::HTTP.start(
-          uri.host,
-          uri.port,
-          use_ssl: uri.scheme == 'https',
-          open_timeout: [OPEN_TIMEOUT, source.deadline].min,
-          read_timeout: [READ_TIMEOUT, source.deadline].min
-        ) do |http|
-          http.max_retries = 0 if http.respond_to?(:max_retries=)
+        # The per-chunk check below cannot fire while a server trickles headers
+        # (or nothing at all) within each read timeout, so the deadline is also
+        # one absolute timeout over the whole exchange.
+        Timeout.timeout(source.deadline, FetchError, "download exceeded its #{source.deadline}s deadline") do
+          Net::HTTP.start(
+            uri.host,
+            uri.port,
+            use_ssl: uri.scheme == 'https',
+            open_timeout: [OPEN_TIMEOUT, source.deadline].min,
+            read_timeout: [READ_TIMEOUT, source.deadline].min
+          ) do |http|
+            http.max_retries = 0 if http.respond_to?(:max_retries=)
 
-          http.request(Net::HTTP::Get.new(uri)) do |response|
-            raise FetchError, "HTTP status #{response.code}" unless response.is_a?(Net::HTTPSuccess)
+            http.request(Net::HTTP::Get.new(uri)) do |response|
+              raise FetchError, "HTTP status #{response.code}" unless response.is_a?(Net::HTTPSuccess)
 
-            declared = response['Content-Length'].to_i
-            if declared > source.max_bytes
-              raise FetchError, "declared size #{declared} bytes exceeds max_bytes #{source.max_bytes}"
-            end
+              declared = response['Content-Length'].to_i
+              if declared > source.max_bytes
+                raise FetchError, "declared size #{declared} bytes exceeds max_bytes #{source.max_bytes}"
+              end
 
-            response.read_body do |chunk|
-              body << chunk
-              raise FetchError, "body exceeds max_bytes #{source.max_bytes}" if body.bytesize > source.max_bytes
-              raise FetchError, "download exceeded its #{source.deadline}s deadline" if monotonic - started > source.deadline
+              response.read_body do |chunk|
+                body << chunk
+                raise FetchError, "body exceeds max_bytes #{source.max_bytes}" if body.bytesize > source.max_bytes
+                raise FetchError, "download exceeded its #{source.deadline}s deadline" if monotonic - started > source.deadline
+              end
             end
           end
         end

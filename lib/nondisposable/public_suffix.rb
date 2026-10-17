@@ -54,6 +54,31 @@ module Nondisposable
         list[:wildcards].include?(labels.drop(1).join('.'))
       end
 
+      # The registrable domain `domain` belongs to: its longest public suffix
+      # plus one label. `school.county.sch.uk` => itself (`county.sch.uk` is a
+      # suffix via `*.sch.uk`); `x.tempmail.com` => `tempmail.com`. nil when
+      # `domain` is itself a public suffix.
+      #
+      # Everything ABOVE this name belongs to the registry or to unrelated
+      # registrants, so no list entry up there may ever match `domain` — not
+      # even a name like `sch.uk` that is not itself a suffix but sits above a
+      # wildcard one.
+      def registrable_domain(domain)
+        labels = domain.to_s.split('.')
+        return nil if labels.empty? || public_suffix?(domain.to_s)
+
+        # An exception rule prevails (`!city.kawasaki.jp` makes its parent the
+        # suffix); otherwise the longest suffix that is public wins.
+        exceptions = rules[:exceptions]
+        exception = (1..labels.size).find { |n| exceptions.include?(labels.last(n).join('.')) }
+        suffix_size = if exception
+                        exception - 1
+                      else
+                        (1...labels.size).select { |n| public_suffix?(labels.last(n).join('.')) }.max || 1
+                      end
+        labels.last(suffix_size + 1).join('.')
+      end
+
       # IANA-style provenance for health checks: "2026-10-16_23-32-13_UTC".
       def version
         @version ||= begin

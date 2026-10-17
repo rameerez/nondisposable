@@ -177,7 +177,7 @@ class NondisposableSourceMergeTest < NondisposableTestCase
       src("disposable", derived_from: %w[mailchecker]) => %w[x.com],
       src("groundcat", derived_from: %w[disposable]) => %w[x.com]
     }
-    assert_equal %w[mailchecker], Nondisposable::SourceMerge.origins_for("x.com", snapshots)
+    assert_equal %w[disposable], Nondisposable::SourceMerge.origins_for("x.com", snapshots)
     refute_includes merge(snapshots).domains, "x.com"
   end
 
@@ -193,6 +193,35 @@ class NondisposableSourceMergeTest < NondisposableTestCase
       src("wesbos") => %w[crawled.com]
     }
     assert_includes merge(snapshots).domains, "crawled.com"
+  end
+
+  def test_two_mirrors_of_the_same_unloaded_upstream_are_one_origin
+    snapshots = {
+      src("mirror1", derived_from: %w[unfetched]) => %w[x.com],
+      src("mirror2", derived_from: %w[unfetched]) => %w[x.com]
+    }
+    refute_includes merge(snapshots).domains, "x.com"
+    assert_equal %w[mirror1], Nondisposable::SourceMerge.origins_for("x.com", snapshots)
+  end
+
+  def test_stale_copies_of_a_withdrawn_entry_cannot_outvote_their_upstream
+    # The upstream fixed a false positive; two mirrors still carry it.
+    snapshots = {
+      src("origin") => %w[other.com],
+      src("m1", derived_from: %w[origin]) => %w[fixed.com],
+      src("m2", derived_from: %w[origin]) => %w[fixed.com]
+    }
+    refute_includes merge(snapshots).domains, "fixed.com"
+  end
+
+  def test_a_shared_downstream_copier_does_not_merge_two_independent_lists
+    snapshots = {
+      src("mailchecker") => %w[x.com],
+      src("wesbos") => %w[x.com],
+      src("disposable", derived_from: %w[mailchecker wesbos]) => %w[x.com]
+    }
+    assert_includes merge(snapshots).domains, "x.com"
+    assert_equal %w[mailchecker wesbos], Nondisposable::SourceMerge.origins_for("x.com", snapshots)
   end
 
   def test_threshold_one_trusts_any_corroborating_source

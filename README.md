@@ -350,13 +350,15 @@ Each source is fetched into its own row in `nondisposable_source_snapshots` (sta
 - it is less than half the size of the largest snapshot still retained for it (so repeated 49% cuts cannot ratchet a list away), or more than three times its last good one;
 - it is identical to a snapshot a human rolled back.
 
-The list is never published empty, and never while a **primary** source has no good snapshot at all (on a first run that would replace the bundled seed with less than it). Additions and removals are logged per source. A source that lists a known real provider, or a public suffix, is logged as a possible poisoning, and the entry is dropped.
+Every size is a count of *storable* domains (not junk, not a public suffix, not a known real provider), so a payload padded with such lines cannot pass for a full list. The list is never published empty. A primary that has never been fetched successfully either stands in its bundled list (the default source) or blocks publishing (any other), so a first run can never replace the seed with less than it. Additions and removals are logged per source. A source that lists a known real provider, or a public suffix, is logged as a possible poisoning, and the entry is dropped. Accepting a snapshot, publishing and rolling back all happen under the same lock; downloads happen outside it.
+
+One known gap during a rolling deploy: a process still running 0.5 or earlier replaces the table without taking the lock, so its single-source list can briefly overwrite a multi-source one. The next update from a new process repairs it.
 
 Two more tools:
 
 ```ruby
 Nondisposable::DomainListUpdater.publish             # rebuild from snapshots, no download (after a config change)
-Nondisposable::DomainListUpdater.rollback("fakefilter") # withdraw that source's newest snapshot and republish
+Nondisposable::DomainListUpdater.rollback("fakefilter") # withdraw that source's newest snapshot (its payload stays refused) and republish
 ```
 
 ## Updating the TLD list

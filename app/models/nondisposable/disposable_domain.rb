@@ -47,7 +47,12 @@ module Nondisposable
           end
         end
 
-        candidates.reject { |candidate| Nondisposable::PublicSuffix.public_suffix?(candidate) }
+        # Never above the registrable domain: past it lie public suffixes and
+        # names like `sch.uk` that sit above a wildcard suffix (`*.sch.uk`).
+        registrable = Nondisposable::PublicSuffix.registrable_domain(domain)
+        return [] unless registrable
+
+        candidates.select { |candidate| candidate == registrable || candidate.end_with?(".#{registrable}") }
       end
     end
 

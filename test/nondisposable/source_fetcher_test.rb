@@ -60,6 +60,16 @@ class NondisposableSourceFetcherTest < NondisposableTestCase
     end
   end
 
+  def test_a_stalled_exchange_is_cut_off_at_the_deadline
+    # Headers trickling in within each read timeout never reach the per-chunk
+    # check; the absolute timeout catches them.
+    stall = proc { |*_args, **_opts| sleep 2 }
+    Net::HTTP.stub(:start, stall) do
+      error = assert_raises(Nondisposable::SourceFetcher::FetchError) { fetch(source(deadline: 0.2)) }
+      assert_includes error.message, "deadline"
+    end
+  end
+
   def test_timeouts_never_exceed_the_deadline
     captured = nil
     fake_start = proc { |_host, _port, **options|
