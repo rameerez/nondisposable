@@ -21,7 +21,10 @@ module Nondisposable
       def disposable?(domain)
         return false if domain.blank?
 
-        domain = Nondisposable::Domain.normalize(domain)
+        raw = domain
+        domain = Nondisposable::Domain.normalize(raw)
+        # Not UTF-8: no list holds it and no mail server can deliver to it.
+        return false if domain.encoding == Encoding::BINARY && !domain.ascii_only?
         config = Nondisposable.configuration
         candidates = match_candidates(domain)
 
@@ -35,7 +38,17 @@ module Nondisposable
         # allowlisted even when a parent domain is on the list.
         return false if excluded.include?(domain)
 
-        where(name: candidates - excluded).exists?
+        names = candidates - excluded
+        # Rows written before 0.5.0 stored a unicode domain as it came
+        # (lowercased, not punycode). Match that spelling too, so upgrading
+        # never unblocks them; the next list refresh rewrites them canonically.
+        legacy = Nondisposable::Domain.unicode(raw)
+        if legacy != domain
+          legacy_excluded = config.excluded_domains.map { |d| Nondisposable::Domain.unicode(d) }
+          names |= match_candidates(legacy) - legacy_excluded
+        end
+
+        where(name: names).exists?
       end
 
       # The exact domain plus up to PARENT_MATCH_DEPTH parent domains,

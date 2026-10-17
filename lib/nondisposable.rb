@@ -31,7 +31,9 @@ module Nondisposable
 
   def self.disposable?(email)
     return false if email.nil? || !email.to_s.include?('@')
-    domain = Domain.from_email(email)
+    # Unicode form: DisposableDomain canonicalises it itself, and needs the
+    # unencoded spelling to match rows stored before 0.5.0.
+    domain = Domain.from_email(email, unicode: true)
     return false if domain.empty?
     DisposableDomain.disposable?(domain)
   end

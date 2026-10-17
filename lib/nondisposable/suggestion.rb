@@ -49,8 +49,11 @@ module Nondisposable
   # (precision over typo+real rows): distance alone 0.07, filter 1 alone 0.27,
   # both 0.55, at 79% recall of reviewed typos. The corpus is the Tranco top 1M,
   # so it is crowded with real popular domains — a signup form sees far more
-  # typos per lookalike than this does. The untouched 30% holdout is measured
-  # by test/nondisposable/lookalike_corpus_test.rb.
+  # typos per lookalike than this does. The other 30% is a RETROSPECTIVE
+  # holdout, measured by test/nondisposable/lookalike_corpus_test.rb: the hash
+  # split was chosen before tuning but only committed with the tuned filters,
+  # so it is not a pre-registered holdout, and one early draft was seen
+  # against it.
   #
   # These filters only decide what to SUGGEST. They are a likelihood, not proof,
   # and nothing in this file ever justifies refusing an address on its own —
@@ -88,7 +91,12 @@ module Nondisposable
     class << self
       # The full corrected address, or nil when we have nothing useful to say.
       def for(email)
-        email = email.to_s.strip
+        email = email.to_s
+        # Bytes that are not UTF-8 have no keystrokes to correct.
+        email = email.dup.force_encoding(Encoding::UTF_8) unless email.encoding == Encoding::UTF_8
+        return nil unless email.valid_encoding?
+
+        email = email.strip
         local, _, domain = email.rpartition('@')
         return nil if local.empty? || domain.empty?
 
@@ -125,6 +133,7 @@ module Nondisposable
         # is somebody typing `gmaíl.com`, and its distance to gmail.com in
         # ASCII is meaningless. We judge the unicode form when we get it and
         # stay silent on the encoded one.
+        return nil if typed.encoding == Encoding::BINARY # not UTF-8: nothing typed to measure
         return nil if typed.split('.').any? { |label| label.start_with?('xn--') }
 
         threshold = Nondisposable.configuration.lookalike_distance.to_i
@@ -133,7 +142,7 @@ module Nondisposable
         best = nil
         best_distance = threshold + 1
 
-        providers.each do |candidate|
+        targets.each do |candidate|
           # Cheap rejection before the O(n*m) walk: an edit changes the length
           # by at most 1 per operation, so anything further apart than the
           # threshold in length alone cannot be within it.
@@ -151,30 +160,42 @@ module Nondisposable
         best
       end
 
-      # Every domain we would suggest, as a frozen Set: the bundled list plus
-      # anything the host added. Memoised per configuration object so a host
-      # changing config in a test or console is picked up.
+      # Every provider, as a frozen Set of canonical (punycode) names: the
+      # bundled list plus anything the host added. This is the EXEMPTION set —
+      # an exact match here is never called a typo. Memoised per configuration
+      # so a host changing config in a test or console is picked up.
       def providers
-        config = Nondisposable.configuration
-        extra = Array(config.additional_email_providers).map { |d| Domain.normalize(d) }
-        cache_key = extra.hash
-
-        if @cache_key != cache_key || @providers.nil?
-          @providers = (bundled_providers + extra).to_set.freeze
-          @cache_key = cache_key
-        end
-
+        refresh_cache
         @providers
+      end
+
+      # The same providers as a human would type them (unicode, not punycode):
+      # what a keystroke is measured against. `bücher.d` is one edit from
+      # `bücher.de` and eleven from `xn--bcher-kva.de`.
+      def targets
+        refresh_cache
+        @targets
       end
 
       def reload!
         @providers = nil
+        @targets = nil
         @bundled_providers = nil
         @cache_key = nil
         self
       end
 
       private
+
+      def refresh_cache
+        extra = Array(Nondisposable.configuration.additional_email_providers).map { |d| Domain.unicode(d) }.reject(&:empty?)
+        cache_key = extra.hash
+        return if @cache_key == cache_key && @providers && @targets
+
+        @targets = (bundled_providers + extra).uniq.freeze
+        @providers = @targets.map { |d| Domain.normalize(d) }.to_set.freeze
+        @cache_key = cache_key
+      end
 
       def bundled_providers
         @bundled_providers ||= File.readlines(LIST_PATH, chomp: true).filter_map do |line|

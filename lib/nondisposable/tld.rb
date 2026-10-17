@@ -162,7 +162,9 @@ module Nondisposable
       # `foo.tk`). Unicode TLDs stay unicode, so #valid? still declines to
       # judge them.
       def normalize(email_or_domain)
-        Nondisposable::Domain.unicode(email_or_domain.to_s.split('@').last.to_s)
+        value = email_or_domain.to_s
+        value = value.b unless value.valid_encoding? # unreadable bytes must not raise
+        Nondisposable::Domain.unicode(value.split('@').last.to_s)
       end
 
       # Skips IANA's comment header and any blank lines.

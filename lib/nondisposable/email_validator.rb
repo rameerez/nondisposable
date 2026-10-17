@@ -43,7 +43,9 @@ module ActiveModel
         begin
           # Without an "@" the whole value is judged as a domain, as it always
           # has been — someone who typed only `tempmail.com` is still refused.
-          domain = value.to_s.include?('@') ? Nondisposable::Domain.from_email(value) : Nondisposable::Domain.normalize(value)
+          # Unicode form: DisposableDomain canonicalises it, and needs the
+          # unencoded spelling to match rows stored before 0.5.0.
+          domain = value.to_s.include?('@') ? Nondisposable::Domain.from_email(value, unicode: true) : Nondisposable::Domain.unicode(value)
           return if domain.empty? # Invalid email format
 
           config = Nondisposable.configuration

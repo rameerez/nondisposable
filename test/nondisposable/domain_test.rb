@@ -154,4 +154,90 @@ class NondisposableDomainTest < NondisposableTestCase
     assert_nil Nondisposable.suggestion_for("someone@carhey.com")
     assert_equal "someone@carhey.com", Nondisposable.suggestion_for("someone@carhye.com")
   end
+  # =========================================================================
+  # Round-2 review regressions (docs/reviews/2026-10-17-pr5-triage.md)
+  # =========================================================================
+
+  def test_zero_width_joiners_are_part_of_the_name
+    # UTS #46 nontransitional: ZWNJ/ZWJ are "deviation" characters that
+    # IDNA2008 keeps, so these are two different registered domains.
+    assert_equal "xn--mgba3gch31f060k.com", normalize("نامه‌ای.com")
+    assert_equal "xn--mgba3gch31f.com", normalize("نامهای.com")
+
+    setup_disposable_domain!("xn--mgba3gch31f.com")
+    refute Nondisposable.disposable?("x@نامه‌ای.com"), "the ZWNJ spelling is not the listed domain"
+    clear_domains!
+    setup_disposable_domain!("xn--mgba3gch31f060k.com")
+    assert Nondisposable.disposable?("x@نامه‌ای.com"), "and its own entry must still catch it"
+  end
+
+  def test_every_ignored_code_point_disappears_on_every_checking_path
+    setup_disposable_domain!("mailinator.com")
+    refute User.new(email: "x@maili᠎nator.com").valid?
+    refute User.new(email: "x@maili\u{E0100}nator.com").valid?
+
+    Nondisposable.configure { |c| c.reject_lookalike_domains = :confirmable }
+    user = ConfirmingUser.new(email: "x@gmial.co\u{E0100}m", email_lookalike_confirmed: "1")
+    refute user.valid?, "a variation selector must not hide a known typo"
+
+    Nondisposable.configure do |c|
+      c.check_tld = true
+      c.blocked_tlds = %w[tk]
+    end
+    refute User.new(email: "x@gmail.t\u{E0100}k").valid?, "nor a blocked TLD"
+  end
+
+  def test_hostile_combining_marks_are_bounded_before_normalisation
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    normalize("a#{"̕" * 2000}#{"̀" * 2000}.com")
+    User.new(email: "x@a#{"̕" * 2000}#{"̀" * 2000}.com").valid?
+
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 0.2
+  end
+
+  def test_invisible_padding_cannot_push_a_listed_domain_past_the_length_bound
+    setup_disposable_domain!("mailinator.com")
+
+    refute User.new(email: "x@#{"­" * 300}mailinator.com").valid?
+  end
+
+  def test_a_unicode_entry_from_a_downloaded_list_is_stored_as_lookups_ask_for_it
+    Nondisposable::DomainListUpdater.send(:replace_domains, ["bücher.de"])
+
+    assert_equal ["xn--bcher-kva.de"], Nondisposable::DisposableDomain.pluck(:name)
+    assert Nondisposable.disposable?("x@bücher.de")
+  end
+
+  def test_a_unicode_row_stored_by_0_4_0_still_blocks_after_upgrading
+    setup_disposable_domain!("bücher.de") # how 0.4.0 stored it
+
+    assert Nondisposable.disposable?("x@bücher.de")
+    Nondisposable.configure { |c| c.excluded_domains = ["Bücher.de"] }
+    refute Nondisposable.disposable?("x@bücher.de"), "an exclusion still wins over a legacy row"
+  end
+
+  def test_a_unicode_provider_is_a_ranking_target_as_typed
+    Nondisposable.configure do |c|
+      c.additional_email_providers = ["bücher.de"]
+      c.reject_lookalike_domains = true
+    end
+
+    assert_equal "x@bücher.de", Nondisposable.suggestion_for("x@bücehr.de")
+    assert_nil Nondisposable.suggestion_for("x@xn--bcher-kva.de"), "the provider itself, in punycode, is exempt"
+    refute User.new(email: "x@bücher.d").valid?, "0.4.0 corrected and refused this; so must we"
+  end
+
+  def test_binary_and_unreadable_input_never_raises
+    assert Nondisposable.valid_tld?("x@bücher.de".b)
+    refute Nondisposable.disposable?("x@bücher.de".b)
+
+    ["x@ma\xFFil.com".b, "x@ma\xFFil.com".dup.force_encoding("UTF-8")].each do |value|
+      Nondisposable.valid_tld?(value)
+      refute Nondisposable.disposable?(value)
+      assert_nil Nondisposable.suggestion_for(value)
+    end
+
+    Nondisposable.configure { |c| c.check_tld = true }
+    assert User.new(email: "x@bücher.de".b).valid?
+  end
 end
