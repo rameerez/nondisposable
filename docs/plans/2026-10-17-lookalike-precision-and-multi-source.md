@@ -1,7 +1,7 @@
 # Plan: lookalike precision, multi-source blocklists, and a fresh-domains list
 
 Status: v2, revised after codex adversarial review (docs/plans/2026-10-17-codex-plan-review.md). §6 overrides earlier sections where they conflict.
-Owner: Javi R (rameerez). Trigger: CarHey SMS-pumping incident, 2026-10-16/17.
+Owner: Javi R (rameerez). Trigger: abusive signups at a production app using this gem, 2026-10-16/17.
 
 ## 0. Why
 
@@ -25,7 +25,7 @@ Two failures surfaced in one incident:
    - `one.com` → `ono.com`; `hive.com`, `life.com`, `jive.com`, `mlive.com` → `live.com`
    - `grail.com`, `pmail.com`, `qmail.com`, `cmail.com` → `gmail.com`
 
-   Against CarHey production (1,641 accounts, 66 domains) it flags only 6, and all
+   Against one production app's signups (66 distinct email domains) it flags only 6, and all
    6 are real typos (`gmailmcom`, `gmail.con`, `outlook.ed`, `gmai.com`, `gmal.com`,
    `jmail.com`). So the rule happens to work on one small app's data and is unsafe
    in general. Top suggestion targets among the 698: `me.com` 47, `rr.com` 35,

@@ -1,4 +1,6 @@
-## [0.6.0] - Unreleased
+## [0.6.0] - 2026-10-17
+
+Ships everything listed under 0.5.0 too: 0.5.0 was never released on its own.
 
 More than one blocklist, without trusting any of them more than it has earned. Triggered by a real incident: signups from `mail-burn.com`, a live 10-minute inbox the default list did not carry. The measurement behind every default is in `docs/evidence/2026-10-17-multi-source-measurement.md`. With the default configuration you still get the one list you had before.
 
@@ -25,7 +27,8 @@ More than one blocklist, without trusting any of them more than it has earned. T
 - Entries that cannot be DNS names (labels over 63 characters, names over 253, IP addresses, HTML) are dropped from downloaded lists. The single-source path also refuses a payload with more than 1% such lines instead of storing it.
 - ⚠️ **The parent-domain walk has no depth cap any more**: it checks every parent down to the registrable domain, so `a.b.c.d.tempmail.com` is blocked when `tempmail.com` is listed (or in `additional_domains`). It used to stop after 3 parent labels, which let whoever controls a listed domain escape with a fourth. Still a single `WHERE name IN (...)` query; DNS caps a name at 253 characters. It never climbs above the registrable domain, so a public suffix (`co.uk`), or a name above a wildcard suffix (`sch.uk`), can never match. `DisposableDomain::PARENT_MATCH_DEPTH` is kept but unused.
 - The table is updated by writing only the difference (still in one transaction), instead of deleting and reinserting every row.
-## [0.5.0] - Unreleased
+
+## [0.5.0] - Not released separately (shipped in 0.6.0)
 
 Lookalike detection you can actually switch on. Replaying the 0.4.0 rule ("one edit from a provider") against the Tranco top 1M flagged 707 domains, and many are large real organisations whose staff would have been refused at signup: `ge.com`, `ml.com`, `mi.com`, `se.com` → `me.com`; `ea.com`, `aa.com` → `ya.com`; `bol.com`, `aon.com`, `uol.com` → `aol.com`; `one.com` → `ono.com`; `hive.com`, `life.com` → `live.com`; `grail.com`, `pmail.com` → `gmail.com`; `web.dev` → `web.de`; `yahoo.com.au` → `yahoo.com.ar`. Offline, nothing can tell those apart from `gmial.com` with certainty, so a guess no longer refuses anybody on its own.
 
