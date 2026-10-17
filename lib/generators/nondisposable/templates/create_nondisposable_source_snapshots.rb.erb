@@ -1,0 +1,42 @@
+class CreateNondisposableSourceSnapshots < ActiveRecord::Migration<%= migration_version %>
+  # One row per fetch of one blocklist source, so the merged
+  # nondisposable_disposable_domains table can always be rebuilt from each
+  # source's last good list (see Nondisposable::SourceSnapshot).
+  #
+  # Additive and safe to roll back: until this table exists, and again after
+  # dropping it, Nondisposable::DomainListUpdater uses the single default list
+  # exactly as before.
+  def change
+    primary_key_type = primary_key_type_setting
+
+    create_table :nondisposable_source_snapshots, id: primary_key_type do |t|
+      t.string :source, null: false
+      t.string :url
+      t.string :status, null: false
+      t.datetime :fetched_at, null: false
+      t.string :sha256
+      t.integer :domain_count
+      # Largest domain_count ever accepted for this source (the shrink guard's
+      # baseline), carried forward on each good snapshot so pruning never
+      # forgets it.
+      t.integer :high_water_count
+      # The largest list we know of is ~1.4 MB. The limit only matters on
+      # MySQL, where plain TEXT stops at 64 KB (this becomes LONGTEXT);
+      # PostgreSQL and SQLite ignore it.
+      t.text :domains, limit: 16.megabytes
+      t.text :error
+
+      t.timestamps
+    end
+
+    add_index :nondisposable_source_snapshots, [:source, :status, :fetched_at],
+              name: "index_nondisposable_source_snapshots_lookup"
+  end
+
+  private
+
+  def primary_key_type_setting
+    config = Rails.configuration.generators
+    config.options[config.orm][:primary_key_type] || :primary_key
+  end
+end

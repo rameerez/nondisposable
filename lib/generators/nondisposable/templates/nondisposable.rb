@@ -14,8 +14,28 @@ Nondisposable.configure do |config|
   # config.on_check_failure = :allow
   #
   # Also match parent domains: an email at x.tempmail.com is blocked when
-  # tempmail.com is on the list (checks up to 3 parent labels). Default: true
+  # tempmail.com is on the list (checks every parent down to the registrable domain). Default: true
   # config.check_parent_domains = true
+
+  # ---- Where the blocklist comes from ----
+  #
+  # Default: the single disposable-email-domains list this gem has always used.
+  # RECOMMENDED adds fakefilter, a second list that watches temp-mail sites
+  # directly (+3,275 domains on 2026-10-17, no known real provider among them).
+  # config.sources = Nondisposable::Sources::RECOMMENDED
+  #
+  # :corroborating sources only block a domain once this many INDEPENDENT
+  # lists carry it (a list that copies another doesn't count twice).
+  # config.corroboration_threshold = 2
+  #
+  # Privacy relays (Hide My Email, DuckDuckGo, Firefox Relay, SimpleLogin,
+  # addy.io) forward to a real inbox. Allowed by default, even when an upstream
+  # list carries them; set to true to refuse them.
+  # config.block_privacy_relays = false
+  #
+  # Who wins when lists disagree (top wins): excluded_domains, the gem's
+  # never-disposable list of real providers, additional_domains, the
+  # privacy-relay setting, the upstream sources.
 
   # ---- Catching typos ----
   #

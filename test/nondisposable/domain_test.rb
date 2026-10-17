@@ -202,7 +202,9 @@ class NondisposableDomainTest < NondisposableTestCase
   end
 
   def test_a_unicode_entry_from_a_downloaded_list_is_stored_as_lookups_ask_for_it
-    Nondisposable::DomainListUpdater.send(:replace_domains, ["bücher.de"])
+    # Through the public path: 0.6.0 replaced the private replace_domains.
+    stub_domain_list("bücher.de\n")
+    assert Nondisposable::DomainListUpdater.update
 
     assert_equal ["xn--bcher-kva.de"], Nondisposable::DisposableDomain.pluck(:name)
     assert Nondisposable.disposable?("x@bücher.de")
