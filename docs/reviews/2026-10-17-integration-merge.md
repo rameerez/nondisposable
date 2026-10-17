@@ -46,5 +46,5 @@ the 0.4.0 twin rows (`legacy_spellings`):
 | R3-3 | Removed the raw 1,024 return in `DisposableDomain.disposable?`. Length is judged only on `Domain.normalize`'s output (≤ 253). `MAX_INPUT_LENGTH` is kept as an alias of `Domain::MAX_RAW_LENGTH`. | `test_soft_hyphen_padding_cannot_hide_a_listed_domain` (`"­" * 1013 + "tempmail.com"`) |
 | R3-4 | `storable_count` = `Precedence.filter(domains, host_policy: false)`. It ignores every host setting and always drops relays, so counts are comparable across policy changes. `reset_baseline` recomputes `domain_count`/`high_water_count` from the latest payload. | `test_a_relay_policy_flip_does_not_trip_the_shrink_guard` (100 relays + 20, flip, reset, accept), `test_reset_baseline_recomputes_from_the_payload` |
 
-Verification: 599 tests, 0 failures (98.33% line / 94.57% branch), plus the
-rails_7.2, rails_8.0 and rails_8.1 appraisals: 599 tests, 0 failures each.
+Verification (clean checkout of the commit): 597 tests, 0 failures (98.31% line / 94.42% branch), plus the
+rails_7.2, rails_8.0 and rails_8.1 appraisals: 597 tests, 0 failures each.
