@@ -11,9 +11,11 @@ module Nondisposable
     # a name at 253 characters, so the candidate list is bounded anyway.
     PARENT_MATCH_DEPTH = 3
 
-    # Longest raw input worth normalizing: a 253-character DNS name, plus room
-    # for whitespace and a unicode form that is longer before punycode.
-    MAX_INPUT_LENGTH = 1_024
+    # Kept (and equal to Domain::MAX_RAW_LENGTH) for code that referenced it.
+    # The raw-length bound itself now lives in Domain.normalize, which applies
+    # it AFTER stripping invisible characters: judging raw length here let
+    # padding hide a listed domain.
+    MAX_INPUT_LENGTH = Nondisposable::Domain::MAX_RAW_LENGTH
     # DNS caps a name at 253 characters, which also bounds the parent walk
     # (at most 127 labels).
     MAX_DOMAIN_LENGTH = 253
@@ -24,11 +26,11 @@ module Nondisposable
       # never-disposable list, then host additions, then the privacy-relay
       # policy, and only then this table.
       def disposable?(domain)
-        # No list can hold a name DNS could never resolve, so refuse to do any
-        # work for one: cheap length checks first, before normalizing or
-        # walking parents, because the input is whatever a signup form sent.
-        return false if domain.to_s.length > MAX_INPUT_LENGTH
-
+        # Length is judged on the CANONICAL form only: a raw cap here would let
+        # invisible padding (`"­" * 1013 + "tempmail.com"`) through even
+        # though it normalizes to a listed name. Domain.normalize bounds its own
+        # work on oversized input; past that, no list can hold a name DNS could
+        # never resolve, so the parent walk below never runs on one.
         raw = domain
         domain = Nondisposable::Domain.normalize(raw)
         return false if domain.empty? || domain.length > MAX_DOMAIN_LENGTH

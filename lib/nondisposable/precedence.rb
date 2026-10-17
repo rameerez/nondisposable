@@ -99,9 +99,15 @@ module Nondisposable
       #
       # Exclusions are exact here, as they always were: the stored list is not
       # where parent-level exclusions take effect, #decide is.
-      def filter(domains, with_additions: true)
+      #
+      # host_policy: false applies only the gem's own rules (validity, public
+      # suffixes, never-disposable, and relays always dropped), ignoring every
+      # host setting. The updater's size guards count that, so their numbers
+      # never depend on the host's configuration.
+      def filter(domains, host_policy: true)
         config = Nondisposable.configuration
-        excluded = configured_set(config.excluded_domains)
+        excluded = host_policy ? configured_set(config.excluded_domains) : Set.new
+        block_relays = host_policy && config.block_privacy_relays
         kept = Set.new
         dropped = []
 
@@ -112,11 +118,11 @@ module Nondisposable
           reason = invalid_reason(domain) ||
                    (:excluded if excluded.include?(domain)) ||
                    (:never_disposable if namespace_hit(domain, never_disposable)) ||
-                   (:privacy_relay if !config.block_privacy_relays && namespace_hit(domain, privacy_relays))
+                   (:privacy_relay if !block_relays && namespace_hit(domain, privacy_relays))
           reason ? dropped << [domain, reason] : kept << domain
         end
 
-        Array(with_additions ? config.additional_domains : []).each do |raw|
+        Array(host_policy ? config.additional_domains : []).each do |raw|
           domain = Domain.normalize(raw)
           next if domain.empty? || excluded.include?(domain)
 

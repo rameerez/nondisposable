@@ -206,4 +206,68 @@ class NondisposableReviewRound2Test < NondisposableTestCase
     setup_disposable_domain!("tempmail.com")
     refute Nondisposable::DisposableDomain.disposable?("\xFF\xFE.tempmail.com".b)
   end
+  # ---- Round 3 (docs/reviews/2026-10-17-pr6-codex-round3.md) -------------
+
+  # R3-3: invisible padding past 1,024 raw characters still normalizes to a
+  # listed domain, and is still blocked.
+  def test_soft_hyphen_padding_cannot_hide_a_listed_domain
+    setup_disposable_domain!("tempmail.com")
+    padded = ("­" * 1013) + "tempmail.com"
+    assert_operator padded.length, :>, 1_024
+    assert Nondisposable::DisposableDomain.disposable?(padded)
+    assert Nondisposable.disposable?("user@#{padded}")
+  end
+
+  # R3-4: a block_privacy_relays flip compares like with like, and a reset
+  # recomputes from the payload.
+  def test_a_relay_policy_flip_does_not_trip_the_shrink_guard
+    a = src("a")
+    Nondisposable.configuration.sources = [a]
+    Nondisposable.configuration.block_privacy_relays = true
+    body = list((1..100).map { |i| "x#{i}.anonaddy.com" }, many(20))
+    stub_source(a, body)
+    assert Updater.update
+
+    Nondisposable.configuration.block_privacy_relays = false
+    stub_source(a, body)
+    assert Updater.update, "the same payload under the other policy is the same size"
+
+    assert Updater.reset_baseline("a")
+    assert_equal 20, Snapshot.last_good("a").high_water_count
+    stub_source(a, list((1..100).map { |i| "x#{i}.anonaddy.com" }, many(20), "extra.com"))
+    assert Updater.update
+  end
+
+  def test_reset_baseline_recomputes_from_the_payload
+    a = src("a")
+    Nondisposable.configuration.sources = [a]
+    stub_source(a, list(many(10)))
+    assert Updater.update
+    Snapshot.last_good("a").update!(domain_count: 999, high_water_count: 999) # a stale figure
+
+    assert Updater.reset_baseline("a")
+    assert_equal 10, Snapshot.last_good("a").high_water_count
+  end
+
+  # R3-1: a snapshots table from an earlier build without high_water_count
+  # never crashes a refresh.
+  def test_a_table_without_high_water_count_still_refreshes
+    ActiveRecord::Base.connection.remove_column(:nondisposable_source_snapshots, :high_water_count)
+    Snapshot.reset_column_information
+    Updater.instance_variable_set(:@warned_high_water, nil)
+    a = src("a")
+    Nondisposable.configuration.sources = [a]
+
+    stub_source(a, list(many(100)))
+    log = capture_log { assert Updater.update }
+    assert_includes log, "has no high_water_count column"
+
+    stub_source(a, list(many(40)))
+    log = capture_log { refute Updater.update }
+    assert_includes log, "shrank to 40 domains from 100", "falls back to retained snapshots"
+
+    assert Updater.reset_baseline("a")
+  ensure
+    Updater.instance_variable_set(:@warned_high_water, nil)
+  end
 end

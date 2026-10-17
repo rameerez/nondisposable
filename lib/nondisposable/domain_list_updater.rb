@@ -115,14 +115,19 @@ module Nondisposable
 
       # Accepts that a source really did shrink: resets its high-water mark to
       # its current good snapshot, so the shrink guard measures from there.
-      # A human decision by design; nothing calls it automatically.
+      # A human decision by design; nothing calls it automatically. The count
+      # is recomputed from that snapshot's payload, never copied from a
+      # stored figure that an older rule may have produced.
       def reset_baseline(source_name)
         with_publish_lock do
           snapshot = SourceSnapshot.last_good(source_name.to_s)
           next false unless snapshot
 
-          snapshot.update!(high_water_count: snapshot.domain_count)
-          log :warn, "Reset the #{source_name} shrink baseline to #{snapshot.domain_count} domains."
+          count = storable_count(snapshot.domain_list)
+          attributes = { domain_count: count }
+          attributes[:high_water_count] = count if high_water_column?
+          snapshot.update!(attributes)
+          log :warn, "Reset the #{source_name} shrink baseline to #{count} domains."
           true
         end || false
       end
@@ -216,26 +221,41 @@ module Nondisposable
 
         log_changes(source, previous, parsed)
         log_poison(source, parsed.domains)
-        high_water = [high_water(source, previous), count].compact.max
-        record(source, 'ok', fetched_at, sha256: sha256, domain_count: count, high_water_count: high_water,
-                                         domains: parsed.domains.join("\n"))
+        attributes = { sha256: sha256, domain_count: count, domains: parsed.domains.join("\n") }
+        attributes[:high_water_count] = [high_water(source, previous), count].compact.max if high_water_column?
+        record(source, 'ok', fetched_at, **attributes)
         true
       end
 
-      # The domains of a list that would actually be stored: what survives the
-      # precedence filter (junk, public suffixes, real providers, relays under
-      # the default policy, exact exclusions), without the host's additions.
-      # Every size guard counts THESE, so a payload padded with anything the
-      # filter drops cannot pass for a full list.
+      # A snapshots table created by an earlier development build of this
+      # branch has no high_water_count. Never crash a refresh over it: fall
+      # back to the retained snapshots, and say so once per process.
+      def high_water_column?
+        present = SourceSnapshot.column_names.include?('high_water_count')
+        unless present || @warned_high_water
+          @warned_high_water = true
+          log :warn, 'nondisposable_source_snapshots has no high_water_count column; the shrink guard falls back to ' \
+                     'retained snapshots. Recreate the table from the current migration to restore it.'
+        end
+        present
+      end
+
+      # The domains of a list that would be stored under ANY host policy: not
+      # junk, not a public suffix, not a known real provider, not a privacy
+      # relay. Host settings (block_privacy_relays, excluded_domains,
+      # additional_domains) are deliberately ignored, so every count of a source
+      # is comparable with every other, before and after a policy change. Every
+      # size guard counts THESE, so a payload padded with anything the filter
+      # can drop cannot pass for a full list.
       def storable_count(domains)
-        Precedence.filter(domains, with_additions: false).kept.size
+        Precedence.filter(domains, host_policy: false).kept.size
       end
 
       # The largest storable count this source has ever had accepted, kept on
       # its newest good snapshot so pruning can never forget it. Without a
       # recorded mark yet: the largest retained count, or the bundled list.
       def high_water(source, previous = SourceSnapshot.last_good(source.name))
-        recorded = previous&.high_water_count
+        recorded = previous&.high_water_count if high_water_column?
         return recorded if recorded # authoritative, and what reset_baseline lowers
 
         retained = SourceSnapshot.ok.where(source: source.name).maximum(:domain_count)
