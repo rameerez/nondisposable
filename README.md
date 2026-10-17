@@ -141,7 +141,7 @@ end
 
 #### Parent domain matching
 
-With `check_parent_domains` enabled (the default since 0.3.0), `user@x.tempmail.com` is blocked when `tempmail.com` is on the list. The check walks up to 3 parent labels (`a.b.c.tempmail.com` → `b.c.tempmail.com` → `c.tempmail.com` → `tempmail.com`) and never matches against bare TLDs like `com`. All candidates are checked in a single indexed query.
+With `check_parent_domains` enabled (the default since 0.3.0), `user@x.tempmail.com` is blocked when `tempmail.com` is on the list. The check walks every parent down to the registrable domain (`a.b.c.d.tempmail.com` → … → `d.tempmail.com` → `tempmail.com`), however deep, and never matches against a public suffix like `com` or `co.uk`. All candidates are checked in a single indexed query. (Until 0.6.0 the walk stopped after 3 parent labels, so whoever controlled a listed domain could escape it with a fourth.)
 
 Since 0.6.0 the walk also never matches a **public suffix** — `co.uk`, `com.br`, `github.io` — using a snapshot of the [Public Suffix List](https://publicsuffix.org) bundled with the gem (no runtime dependency, no network). Upstream lists really do carry entries like `it.com` and `ddns.net`, under which anybody can register a name; one such line would otherwise refuse every unrelated company below it. Public suffixes are also never stored and never accepted from `additional_domains`.
 

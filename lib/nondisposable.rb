@@ -68,8 +68,8 @@ module Nondisposable
 
     attr_accessor :error_message, :additional_domains, :excluded_domains
     # Whether to also match parent domains: with the default true, an email at
-    # x.tempmail.com is blocked when tempmail.com is on the list (checks up to
-    # DisposableDomain::PARENT_MATCH_DEPTH parent labels, never a bare TLD).
+    # x.tempmail.com is blocked when tempmail.com is on the list (checks
+    # every parent down to the registrable domain, never a public suffix).
     attr_accessor :check_parent_domains
     attr_reader :on_check_failure
 

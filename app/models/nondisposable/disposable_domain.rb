@@ -4,17 +4,11 @@ module Nondisposable
   class DisposableDomain < ApplicationRecord
     validates :name, presence: true, uniqueness: { case_sensitive: false }
 
-    # How many leading labels the parent-domain walk strips when
-    # check_parent_domains is enabled: user@a.b.c.tempmail.com is checked as
-    # a.b.c.tempmail.com, b.c.tempmail.com, c.tempmail.com and tempmail.com.
-    #
-    # The walk never queries a public suffix — not a bare TLD like "com", and
-    # since 0.6.0 not a multi-label one like "co.uk" or "github.io" either
-    # (Nondisposable::PublicSuffix), so no single stored row can ever block a
-    # whole namespace of unrelated registrants. Conversely, a throwaway address
-    # nested more than 3 labels below a listed domain escapes the walk;
-    # blocklisted domains are registrable domains, so 3 levels covers practical
-    # abuse.
+    # Kept so code that referenced it still loads; no longer used. Until 0.6.0
+    # the parent walk stopped after this many labels, which let anybody who
+    # controls a listed domain escape it with `a.b.c.d.tempmail.com`. The walk
+    # now covers every parent down to the registrable domain: DNS itself caps
+    # a name at 253 characters, so the candidate list is bounded anyway.
     PARENT_MATCH_DEPTH = 3
 
     class << self
@@ -29,30 +23,23 @@ module Nondisposable
         verdict, candidates = Nondisposable::Precedence.decide(domain, match_candidates(domain))
         return verdict == :block unless verdict == :lookup
 
-        candidates.any? && where(name: candidates).exists?
+        candidates.any? && where(name: candidates).exists? # one WHERE name IN (...)
       end
 
-      # The exact domain plus up to PARENT_MATCH_DEPTH parent domains, never a
-      # public suffix (so never a bare TLD either). Expects a normalized domain.
+      # With check_parent_domains (the default): the domain and EVERY parent
+      # down to, and including, its registrable domain:
+      #
+      #   a.b.c.d.tempmail.com => a.b.c.d.tempmail.com … d.tempmail.com, tempmail.com
+      #
+      # Never above the registrable domain: past it lie public suffixes (`com`,
+      # `co.uk`) and names like `sch.uk` that sit above a wildcard suffix
+      # (`*.sch.uk`), all belonging to unrelated registrants. Without
+      # check_parent_domains: the domain alone. Expects a normalized domain.
       def match_candidates(domain)
-        candidates = [domain]
+        namespace = Nondisposable::Precedence.namespace(domain)
+        return namespace if Nondisposable.configuration.check_parent_domains
 
-        if Nondisposable.configuration.check_parent_domains
-          labels = domain.split('.')
-          1.upto(PARENT_MATCH_DEPTH) do |depth|
-            parent = labels.drop(depth)
-            break if parent.size < 2
-
-            candidates << parent.join('.')
-          end
-        end
-
-        # Never above the registrable domain: past it lie public suffixes and
-        # names like `sch.uk` that sit above a wildcard suffix (`*.sch.uk`).
-        registrable = Nondisposable::PublicSuffix.registrable_domain(domain)
-        return [] unless registrable
-
-        candidates.select { |candidate| candidate == registrable || candidate.end_with?(".#{registrable}") }
+        namespace.first(1)
       end
     end
 

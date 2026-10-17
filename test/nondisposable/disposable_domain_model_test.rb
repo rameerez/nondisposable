@@ -281,12 +281,47 @@ class DisposableDomainModelTest < NondisposableTestCase
     assert Nondisposable::DisposableDomain.disposable?("a.b.c.tempmail.com")
   end
 
-  def test_parent_walk_is_capped_at_three_labels
+  # External finding (CarHey #494 codex review, 2026-10-17): the walk used to
+  # stop after 3 parent labels, so whoever controls a listed domain could
+  # escape it by adding a fourth. It now walks every parent down to the
+  # registrable domain.
+  def test_parent_walk_has_no_depth_cap
     setup_disposable_domain!("tempmail.com")
 
-    # Four levels of nesting escapes the walk — documented depth trade-off
-    refute Nondisposable::DisposableDomain.disposable?("a.b.c.d.tempmail.com")
-    assert_equal 3, Nondisposable::DisposableDomain::PARENT_MATCH_DEPTH
+    assert Nondisposable::DisposableDomain.disposable?("a.b.c.d.tempmail.com")
+    assert Nondisposable::DisposableDomain.disposable?(([*"a".."t"].join(".")) + ".tempmail.com") # 20 levels
+  end
+
+  def test_additional_domains_have_no_depth_cap
+    Nondisposable.configuration.additional_domains = %w[paxeluni.com]
+
+    assert Nondisposable::DisposableDomain.disposable?("a.b.c.d.paxeluni.com")
+    assert Nondisposable::DisposableDomain.disposable?(([*"a".."t"].join(".")) + ".PAXELUNI.com.")
+  end
+
+  def test_excluded_domains_have_no_depth_cap
+    Nondisposable.configuration.additional_domains = %w[paxeluni.com]
+    Nondisposable.configuration.excluded_domains = %w[paxeluni.com]
+
+    refute Nondisposable::DisposableDomain.disposable?(([*"a".."t"].join(".")) + ".paxeluni.com")
+  end
+
+  def test_deep_walk_is_still_one_query
+    setup_disposable_domain!("tempmail.com")
+    deep = ([*"a".."t"].join(".")) + ".tempmail.com"
+    queries = []
+    callback = ->(*, payload) { queries << payload[:sql] unless payload[:name] == "SCHEMA" }
+
+    ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
+      assert Nondisposable::DisposableDomain.disposable?(deep)
+    end
+    assert_equal 1, queries.size
+    assert_includes queries.first, "IN ("
+  end
+
+  def test_deep_walk_stops_at_the_registrable_domain
+    candidates = Nondisposable::DisposableDomain.match_candidates("a.b.c.d.e.bbc.co.uk")
+    assert_equal %w[a.b.c.d.e.bbc.co.uk b.c.d.e.bbc.co.uk c.d.e.bbc.co.uk d.e.bbc.co.uk e.bbc.co.uk bbc.co.uk], candidates
   end
 
   def test_parent_walk_matches_intermediate_parents

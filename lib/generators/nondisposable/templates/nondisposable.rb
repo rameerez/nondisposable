@@ -14,7 +14,7 @@ Nondisposable.configure do |config|
   # config.on_check_failure = :allow
   #
   # Also match parent domains: an email at x.tempmail.com is blocked when
-  # tempmail.com is on the list (checks up to 3 parent labels). Default: true
+  # tempmail.com is on the list (checks every parent down to the registrable domain). Default: true
   # config.check_parent_domains = true
 
   # ---- Where the blocklist comes from ----

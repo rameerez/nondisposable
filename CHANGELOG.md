@@ -20,7 +20,7 @@ More than one blocklist, without trusting any of them more than it has earned. T
 - ⚠️ **Precedence**: one table, applied both when checking and when building the list: `excluded_domains` > `never_disposable` > `additional_domains` > privacy-relay policy > sources. Before, `additional_domains` was checked first, so a domain in both `additional_domains` and `excluded_domains` was **blocked**; it is now **allowed**. `additional_domains` can no longer block a real provider listed in `never_disposable` (ignored with a warning).
 - ⚠️ Two domains the default upstream list carries are **no longer blocked**: `sify.com` (Indian ISP) and `21cn.com` (China Telecom webmail).
 - Entries that cannot be DNS names (labels over 63 characters, names over 253, IP addresses, HTML) are dropped from downloaded lists. The single-source path also refuses a payload with more than 1% such lines instead of storing it.
-- The parent-domain walk skips public suffixes, so a single-label or `co.uk`-style row can never match.
+- ⚠️ **The parent-domain walk has no depth cap any more**: it checks every parent down to the registrable domain, so `a.b.c.d.tempmail.com` is blocked when `tempmail.com` is listed (or in `additional_domains`). It used to stop after 3 parent labels, which let whoever controls a listed domain escape with a fourth. Still a single `WHERE name IN (...)` query; DNS caps a name at 253 characters. It never climbs above the registrable domain, so a public suffix (`co.uk`), or a name above a wildcard suffix (`sch.uk`), can never match. `DisposableDomain::PARENT_MATCH_DEPTH` is kept but unused.
 - The table is updated by writing only the difference (still in one transaction), instead of deleting and reinserting every row.
 
 ## [0.4.0] - 2026-08-25
