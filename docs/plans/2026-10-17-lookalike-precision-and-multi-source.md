@@ -228,9 +228,9 @@ Reproducibility: Tranco top-1M CSV downloaded 2026-10-17 from
   `excluded_domains` (host) > bundled `never_disposable.txt` (real providers, ISPs)
   > `additional_domains` (host) > relay policy (`block_privacy_relays`, relays live
   in their own list, NOT in never_disposable) > merged sources.
-  Note: today `additional_domains` beats exclusions; this flips it for the bundled
-  never-list only, host exclusions already… — implementer: write the table into
-  README and tests, call out the change in CHANGELOG.
+  Today `additional_domains` is checked BEFORE `excluded_domains` (a host
+  exclusion cannot override a host addition). The table above makes host
+  exclusions win; document it in README + CHANGELOG and test every row.
 - Snapshots: new table `nondisposable_source_snapshots` (source, fetched_at,
   sha256, domain_count, status, domains text) via an ADDITIVE upgrade migration
   generator; the merged `disposable_domains` table is rebuilt from the last good
