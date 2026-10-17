@@ -50,6 +50,14 @@ module ActiveModel
 
           config = Nondisposable.configuration
 
+          # A domain longer than DNS allows (RFC 1035; RFC 5321 caps it at
+          # 255) cannot receive mail and is in no list, so "not disposable"
+          # would be a lie: refuse it as invalid, whatever else is switched
+          # on. Only for real addresses — a value without "@" is `format:`'s.
+          if value.to_s.include?('@') && Nondisposable::Domain.too_long?(domain)
+            return reject(record, attribute, config.invalid_tld_error_message)
+          end
+
           if Nondisposable::DisposableDomain.disposable?(domain)
             return reject(record, attribute, options[:message] || config.error_message)
           end

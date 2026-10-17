@@ -99,6 +99,16 @@ module Nondisposable
         value.split('.', -1).map { |label| label.ascii_only? ? label : "xn--#{punycode(label)}" }.join('.')
       end
 
+      # Longer than DNS allows once normalised — over 253 characters, a label
+      # over 63, or more than MAX_RAW_LENGTH code points before NFKC could
+      # even run? Such a name cannot be registered, so no address at it can
+      # receive mail, and no list can hold it: callers must treat it as
+      # invalid rather than as "not disposable". Judged on the punycode form,
+      # since a label that fits in unicode can still encode past 63.
+      def too_long?(domain)
+        oversized?(normalize(domain))
+      end
+
       # The same canonicalisation WITHOUT the punycode step, for code that
       # compares what a human typed (the suggestion layer: a keyboard slip is a
       # distance between the characters someone pressed, and punycode letters

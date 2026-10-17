@@ -291,4 +291,27 @@ class NondisposableDomainTest < NondisposableTestCase
     assert Nondisposable::DomainListUpdater.update
     assert_equal 1, Nondisposable::DisposableDomain.where(name: "bücher.de").count
   end
+  def test_a_domain_longer_than_dns_allows_is_invalid_not_clean
+    # Never "not disposable": no list can hold it and no mail reaches it.
+    %W[x@#{"a" * 64}.com x@#{"a." * 130}com x@#{"é" * 64}.com x@#{"̕" * 1100}a.com].each do |email|
+      user = User.new(email: email)
+      refute user.valid?, "#{email[0, 40]}… must be refused"
+      assert_includes user.errors[:email], "doesn't look like a real email address"
+    end
+
+    # Exactly at the limits is fine.
+    assert User.new(email: "x@#{"a" * 63}.com").valid?
+    assert User.new(email: "x@#{(["a" * 63] * 3).join(".")}.#{"b" * 61}").valid?
+  end
+
+  def test_invisible_padding_is_stripped_before_the_raw_cap
+    # 1,013 soft hyphens around tempmail.com: stripped first, so it is
+    # tempmail.com — and blocked as such, not waved through as too long.
+    setup_disposable_domain!("tempmail.com")
+    user = User.new(email: "x@#{"­" * 1013}tempmail.com")
+
+    assert_equal "tempmail.com", normalize("#{"­" * 1013}tempmail.com")
+    refute user.valid?
+    assert_includes user.errors[:email], "provider is not allowed"
+  end
 end
