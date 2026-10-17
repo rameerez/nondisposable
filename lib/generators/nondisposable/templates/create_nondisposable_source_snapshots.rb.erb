@@ -16,6 +16,10 @@ class CreateNondisposableSourceSnapshots < ActiveRecord::Migration<%= migration_
       t.datetime :fetched_at, null: false
       t.string :sha256
       t.integer :domain_count
+      # Largest domain_count ever accepted for this source (the shrink guard's
+      # baseline), carried forward on each good snapshot so pruning never
+      # forgets it.
+      t.integer :high_water_count
       # The largest list we know of is ~1.4 MB. The limit only matters on
       # MySQL, where plain TEXT stops at 64 KB (this becomes LONGTEXT);
       # PostgreSQL and SQLite ignore it.

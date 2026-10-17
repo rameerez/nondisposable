@@ -37,7 +37,7 @@ class UpgradeGeneratorTest < Rails::Generators::TestCase
 
     assert connection.table_exists?(:nondisposable_source_snapshots)
     columns = connection.columns(:nondisposable_source_snapshots).map(&:name)
-    %w[source url status fetched_at sha256 domain_count domains error].each { |c| assert_includes columns, c }
+    %w[source url status fetched_at sha256 domain_count high_water_count domains error].each { |c| assert_includes columns, c }
     assert connection.index_exists?(:nondisposable_source_snapshots, [:source, :status, :fetched_at])
 
     ActiveRecord::Migration.suppress_messages { CreateNondisposableSourceSnapshots.migrate(:down) }

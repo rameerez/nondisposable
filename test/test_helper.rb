@@ -143,6 +143,7 @@ module NondisposableTestHelper
       t.datetime :fetched_at, null: false
       t.string :sha256
       t.integer :domain_count
+      t.integer :high_water_count
       t.text :domains
       t.text :error
       t.timestamps

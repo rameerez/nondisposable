@@ -28,7 +28,9 @@ module Nondisposable
 
     class << self
       # `snapshots` is { Source => Array<String> (normalized domains) }.
-      def call(snapshots, threshold:)
+      # `lineage` is every configured source, so a declared link still counts
+      # when the source in the middle of it has no snapshot (failed fetch).
+      def call(snapshots, threshold:, lineage: snapshots.keys)
         threshold = Integer(threshold)
         raise ArgumentError, 'corroboration_threshold must be at least 1' if threshold < 1
 
@@ -38,7 +40,8 @@ module Nondisposable
         primaries.each { |_, domains| blocked.merge(domains) }
         primary_count = blocked.size
 
-        ancestors = ancestry(snapshots.keys)
+        ancestors = ancestry(lineage | snapshots.keys)
+        verdicts = {} # voter set => enough independent origins? (lists share few sets)
 
         votes = Hash.new { |hash, key| hash[key] = [] }
         corroborating.each do |source, domains|
@@ -49,7 +52,8 @@ module Nondisposable
         votes.each do |domain, voters|
           next if voters.size < threshold # cannot reach it even before lineage
 
-          next if independent_origins(voters, ancestors).size < threshold
+          enough = verdicts.fetch(voters) { verdicts[voters] = independent_subset?(voters, threshold, ancestors) }
+          next unless enough
 
           blocked << domain
           corroborated += 1
@@ -63,12 +67,27 @@ module Nondisposable
       # A largest set of pairwise-unrelated sources voting for `domain`
       # (alphabetically first among ties). For explaining a verdict in a
       # console; #call uses the same rule.
-      def origins_for(domain, snapshots)
+      def origins_for(domain, snapshots, lineage: snapshots.keys)
         voters = snapshots.select { |_, domains| domains.include?(domain) }.keys.map(&:name)
-        independent_origins(voters, ancestry(snapshots.keys))
+        independent_origins(voters, ancestry(lineage | snapshots.keys))
       end
 
       private
+
+      # Is there a set of `size` pairwise-unrelated voters? Only subsets of
+      # exactly that size are tried, so the cost is C(voters, threshold), not
+      # 2^voters, and #call memoizes it per voter set.
+      def independent_subset?(voters, size, ancestors)
+        return false if voters.size < size
+
+        voters.sort.combination(size).any? do |subset|
+          subset.combination(2).none? { |a, b| related?(a, b, ancestors) }
+        end
+      end
+
+      def related?(a, b, ancestors)
+        ancestors[a].include?(b) || ancestors[b].include?(a) || ancestors[a].intersect?(ancestors[b])
+      end
 
       # Brute force over subsets, largest first: there are only ever a handful
       # of corroborating sources, and most domains have one or two voters.

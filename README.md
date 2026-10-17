@@ -347,18 +347,23 @@ Each source is fetched into its own row in `nondisposable_source_snapshots` (sta
 - the download fails, takes longer than the source's `deadline` (30 s), or is larger than its `max_bytes` (8 MB, checked while streaming);
 - more than 1% of its lines are not domain names (an HTML error page, a format change);
 - it has fewer than `minimum_count` domains (1,000 for the presets);
-- it is less than half the size of the largest snapshot still retained for it (so repeated 49% cuts cannot ratchet a list away), or more than three times its last good one;
+- it is less than half the source's high-water mark, the largest size ever accepted for it (kept on its newest good snapshot, so neither pruning nor a series of 49% cuts can wear it down; `reset_baseline` is the human override), or more than three times its last good one;
 - it is identical to a snapshot a human rolled back.
 
 Every size is a count of *storable* domains (not junk, not a public suffix, not a known real provider), so a payload padded with such lines cannot pass for a full list. The list is never published empty. A primary that has never been fetched successfully either stands in its bundled list (the default source) or blocks publishing (any other), so a first run can never replace the seed with less than it. Additions and removals are logged per source. A source that lists a known real provider, or a public suffix, is logged as a possible poisoning, and the entry is dropped. Accepting a snapshot, publishing and rolling back all happen under the same lock; downloads happen outside it.
 
-One known gap during a rolling deploy: a process still running 0.5 or earlier replaces the table without taking the lock, so its single-source list can briefly overwrite a multi-source one. The next update from a new process repairs it.
+> [!WARNING]
+> **Two concurrency limits, by design:**
+>
+> - **SQLite: run the refresh from one process.** PostgreSQL and MySQL get a database-wide advisory lock; SQLite has none, so the lock is per process. Two *processes* refreshing at once can interleave (one can republish a merge it read before the other rolled a source back). Schedule `DisposableEmailDomainListUpdateJob` on a single job runner, and run `rollback` from that same process or when no update is running.
+> - **Rolling deploys: quiesce the old updater.** Processes still running 0.5 or earlier replace the table without taking the lock, so their single-source list can overwrite a multi-source one, or leave back a row a new process just withdrew. When upgrading: pause the scheduled refresh job, deploy, run `rails g nondisposable:upgrade && rails db:migrate`, then resume it and run `Nondisposable::DomainListUpdater.update` once.
 
 Two more tools:
 
 ```ruby
 Nondisposable::DomainListUpdater.publish             # rebuild from snapshots, no download (after a config change)
 Nondisposable::DomainListUpdater.rollback("fakefilter") # withdraw that source's newest snapshot (its payload stays refused) and republish
+Nondisposable::DomainListUpdater.reset_baseline("fakefilter") # accept a genuine shrink: the guard now measures from today's size
 ```
 
 ## Updating the TLD list

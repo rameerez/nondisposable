@@ -97,7 +97,7 @@ module Nondisposable
       #
       # Exclusions are exact here, as they always were: the stored list is not
       # where parent-level exclusions take effect, #decide is.
-      def filter(domains)
+      def filter(domains, with_additions: true)
         config = Nondisposable.configuration
         excluded = configured_set(config.excluded_domains)
         kept = Set.new
@@ -111,7 +111,7 @@ module Nondisposable
           reason ? dropped << [domain, reason] : kept << domain
         end
 
-        Array(config.additional_domains).each do |raw|
+        Array(with_additions ? config.additional_domains : []).each do |raw|
           domain = Domain.normalize(raw)
           next if domain.empty? || excluded.include?(domain)
 

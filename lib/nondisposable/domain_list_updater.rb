@@ -91,19 +91,39 @@ module Nondisposable
       # the same payload is refused if upstream serves it again) and republishes
       # from the one before. The emergency brake for a poisoned upstream; a
       # permanent fix is excluding the domain, or removing the source.
+      #
+      # If nothing good is left for any primary, the list bundled with the gem
+      # stands in, even over a populated table: a rollback must always end
+      # with the withdrawn list unpublished.
       def rollback(source_name)
-        snapshot = SourceSnapshot.last_good(source_name.to_s)
-        unless snapshot
-          log :error, "Nothing to roll back: source #{source_name} has no good snapshot."
-          return false
-        end
-
         with_publish_lock do
+          # Chosen INSIDE the lock: a refresh accepted between choosing and
+          # locking would otherwise survive the rollback it raced.
+          snapshot = SourceSnapshot.last_good(source_name.to_s)
+          unless snapshot
+            log :error, "Nothing to roll back: source #{source_name} has no good snapshot."
+            next false
+          end
+
           snapshot.update!(status: 'rolled_back')
           log :warn, "Rolled back #{source_name} snapshot ##{snapshot.id} (#{snapshot.domain_count} domains, fetched #{snapshot.fetched_at})."
           # A withdrawn source with no older good snapshot is simply left out:
           # keeping its poisoned list published would defeat the rollback.
           publish!(withdrawn: source_name.to_s)
+        end || false
+      end
+
+      # Accepts that a source really did shrink: resets its high-water mark to
+      # its current good snapshot, so the shrink guard measures from there.
+      # A human decision by design; nothing calls it automatically.
+      def reset_baseline(source_name)
+        with_publish_lock do
+          snapshot = SourceSnapshot.last_good(source_name.to_s)
+          next false unless snapshot
+
+          snapshot.update!(high_water_count: snapshot.domain_count)
+          log :warn, "Reset the #{source_name} shrink baseline to #{snapshot.domain_count} domains."
+          true
         end || false
       end
 
@@ -156,7 +176,7 @@ module Nondisposable
       def refresh(source)
         fetched_at = Time.current
         parsed = Source.parse(SourceFetcher.fetch(source))
-        with_publish_lock { accept(source, parsed, fetched_at) } || false
+        with_publish_lock { accept(source, parsed) } || false
       rescue StandardError => e
         log :error, "Could not fetch #{source.name} (#{source.url}): #{e.class}: #{e.message}. Keeping its last good snapshot."
         begin
@@ -173,7 +193,11 @@ module Nondisposable
         end
       end
 
-      def accept(source, parsed, fetched_at)
+      # `fetched_at` is the ACCEPTANCE time, taken under the lock: snapshots
+      # are ordered by when they were judged, so a slow job that finishes late
+      # can never slot an older verdict above a newer one.
+      def accept(source, parsed)
+        fetched_at = Time.current
         sha256 = Digest::SHA256.hexdigest(parsed.domains.join("\n"))
         count = storable_count(parsed.domains)
         previous = SourceSnapshot.last_good(source.name)
@@ -185,24 +209,37 @@ module Nondisposable
         end
 
         if previous && previous.sha256 == sha256
-          previous.update!(fetched_at: fetched_at)
+          previous.update!(fetched_at: [previous.fetched_at, fetched_at].max)
           log :info, "#{source.name}: unchanged (#{count} domains)."
           return true
         end
 
         log_changes(source, previous, parsed)
         log_poison(source, parsed.domains)
-        record(source, 'ok', fetched_at, sha256: sha256, domain_count: count, domains: parsed.domains.join("\n"))
+        high_water = [high_water(source, previous), count].compact.max
+        record(source, 'ok', fetched_at, sha256: sha256, domain_count: count, high_water_count: high_water,
+                                         domains: parsed.domains.join("\n"))
         true
       end
 
-      # The domains of a list that could ever be stored: not junk, not a public
-      # suffix, not a known real provider. Every size guard counts THESE, so a
-      # payload padded with suffixes or real providers cannot pass for a full
-      # list (6,000 `*.com.br`-style lines plus one employer is one domain).
+      # The domains of a list that would actually be stored: what survives the
+      # precedence filter (junk, public suffixes, real providers, relays under
+      # the default policy, exact exclusions), without the host's additions.
+      # Every size guard counts THESE, so a payload padded with anything the
+      # filter drops cannot pass for a full list.
       def storable_count(domains)
-        never = Precedence.never_disposable
-        domains.count { |domain| Precedence.invalid_reason(domain).nil? && !Precedence.namespace_hit(domain, never) }
+        Precedence.filter(domains, with_additions: false).kept.size
+      end
+
+      # The largest storable count this source has ever had accepted, kept on
+      # its newest good snapshot so pruning can never forget it. Without a
+      # recorded mark yet: the largest retained count, or the bundled list.
+      def high_water(source, previous = SourceSnapshot.last_good(source.name))
+        recorded = previous&.high_water_count
+        return recorded if recorded # authoritative, and what reset_baseline lowers
+
+        retained = SourceSnapshot.ok.where(source: source.name).maximum(:domain_count)
+        [retained, bundled_count(source)].compact.max
       end
 
       # nil when the snapshot may be used, otherwise why not. `count` is the
@@ -220,7 +257,7 @@ module Nondisposable
           return 'it is identical to a snapshot that was rolled back'
         end
 
-        largest = [SourceSnapshot.ok.where(source: source.name).maximum(:domain_count), bundled_count(source)].compact.max
+        largest = high_water(source, previous)
         if largest && count < largest * MAX_SHRINK_RATIO
           return "it shrank to #{count} domains from #{largest} (more than #{(MAX_SHRINK_RATIO * 100).round}%)"
         end
@@ -270,7 +307,14 @@ module Nondisposable
           return false
         end
 
-        merged = SourceMerge.call(snapshots, threshold: Nondisposable.configuration.corroboration_threshold)
+        if withdrawn && snapshots.keys.none?(&:primary?)
+          log :warn, "No primary source has a good snapshot after rolling back #{withdrawn}; " \
+                     'publishing the list bundled with the gem in its place.'
+          snapshots[Sources::DISPOSABLE_EMAIL_DOMAINS.with(name: 'bundled-fallback')] = Source.parse(bundled_domains.join("\n")).domains
+        end
+
+        merged = SourceMerge.call(snapshots, threshold: Nondisposable.configuration.corroboration_threshold,
+                                             lineage: configured_sources)
         log :info, "Merged #{snapshots.size} source(s): #{merged.primary_count} from primaries, #{merged.corroborated_count} corroborated."
         published = publish_domains(merged.domains)
         seed! unless published
