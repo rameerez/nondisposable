@@ -49,6 +49,17 @@ class NondisposableDomainTest < NondisposableTestCase
     assert_equal "mailinator.com", normalize("mail​inator.com")
   end
 
+  def test_an_oversized_unicode_label_is_not_encoded
+    # Longer than DNS allows, so it cannot be anybody's domain — and encoding
+    # it would be quadratic work on attacker-controlled input.
+    huge = (0x4E00...(0x4E00 + 4000)).to_a.pack("U*")
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+    assert_equal "#{huge}.com", normalize("#{huge}.com")
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 0.1
+    refute Nondisposable.disposable?("x@#{huge}.com")
+  end
+
   def test_blank_and_unreadable_input_is_harmless
     assert_equal "", normalize(nil)
     assert_equal "", normalize("   ")

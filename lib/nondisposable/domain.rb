@@ -63,6 +63,12 @@ module Nondisposable
       def normalize(domain)
         value = unicode(domain)
         return value if value.ascii_only?
+        # DNS caps a name at 253 octets and a label at 63, and the encoder
+        # below is quadratic in the distinct code points of a label — so a
+        # 4,000-character label typed into a signup form (or shipped in a
+        # downloaded list) would cost seconds. Nothing that long can be a
+        # registered domain or match a stored row; hand it back unencoded.
+        return value if value.length > 253 || value.split('.', -1).any? { |label| label.length > 63 }
 
         value.split('.', -1).map { |label| label.ascii_only? ? label : "xn--#{punycode(label)}" }.join('.')
       rescue ArgumentError, Encoding::CompatibilityError
