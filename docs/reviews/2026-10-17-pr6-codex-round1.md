@@ -1,0 +1,25 @@
+1. [blocker] [disposable_domain.rb:50](/Users/javi/GitHub/nondisposable-b/app/models/nondisposable/disposable_domain.rb:50): Parent matching skips PSL nodes but continues above them. One upstream `sch.uk` entry blocks `school.county.sch.uk`, despite `county.sch.uk` matching `*.sch.uk`. Fix: stop at the prevailing public-suffix boundary; reject wildcard bases during ingestion.
+
+2. [blocker] [domain_list_updater.rb:239](/Users/javi/GitHub/nondisposable-b/lib/nondisposable/domain_list_updater.rb:239): Rolling back a primary’s only good snapshot leaves its poisoned published list active: publishing refuses the missing primary, and `seed!` refuses the populated table. Pruning earlier good snapshots creates the same failure. Fix: retain clean rollback history and provide an explicit bundled fallback when withdrawing a primary.
+
+3. [major] [source_snapshot.rb:57](/Users/javi/GitHub/nondisposable-b/app/models/nondisposable/source_snapshot.rb:57): Five failed fetches prune a rolled-back snapshot. Its identical poisoned payload then passes the rollback guard and blocks the employer again. Fix: persist revoked hashes independently of bounded snapshot history.
+
+4. [major] [domain_list_updater.rb:168](/Users/javi/GitHub/nondisposable-b/lib/nondisposable/domain_list_updater.rb:168): Snapshot acceptance happens outside the publish lock. A refresh can pass its guard, pause while another update publishes and rolls back that payload, then insert a new `ok` copy and restore the poison. Fix: serialize guard checks, snapshot mutations, rollback, pruning, and publication; fetch outside the lock.
+
+5. [major] [domain_list_updater.rb:201](/Users/javi/GitHub/nondisposable-b/lib/nondisposable/domain_list_updater.rb:201): Size guards count entries that precedence subsequently discards. Reproduced with the default source: 6,000 PSL entries plus one employer replace the 8,199-domain seed with that employer alone. Without the employer, a first run remains empty without seeding. Fix: guard effective publishable counts and seed an empty table after unsuccessful publication.
+
+6. [major] [source_snapshot.rb:54](/Users/javi/GitHub/nondisposable-b/app/models/nondisposable/source_snapshot.rb:54): Pruning defeats the shrink guard. Reproduced: accept 100 → 60 domains, suffer five failures, then accept 36 because the 100-domain baseline disappeared. Fix: persist the accepted high-water count outside prunable history; extend the ratchet test beyond retention.
+
+7. [major] [domain_list_updater.rb:314](/Users/javi/GitHub/nondisposable-b/lib/nondisposable/domain_list_updater.rb:314): SQLite processes read the current list before acquiring their write transaction. Interleaved publishers targeting `{a}` and `{b}` can leave `{a,b}`, retaining withdrawn false positives. Old writers ignoring the advisory lock create the same stale-diff problem during rolling deployment. Fix: serialize SQLite reads and writes with an immediate transaction; use atomic full replacement while legacy writers remain.
+
+8. [major] [source_merge.rb:54](/Users/javi/GitHub/nondisposable-b/lib/nondisposable/source_merge.rb:54): Two mirrors declaring the same unloaded upstream count as two independent origins. One poisoned origin therefore satisfies threshold 2 through its copies. The same occurs when the origin removes a false positive but both mirrors retain it. Fix: treat overlapping declared ancestry conservatively as correlated evidence.
+
+9. [major] [precedence.rb:70](/Users/javi/GitHub/nondisposable-b/lib/nondisposable/precedence.rb:70): Adding an exclusion can introduce a rejection. With stored `x.anonaddy.com`, defaults allow it; adding `excluded_domains = ["anonaddy.com"]` makes validation block it, while `filter` drops that row. Fix: exclusions must not disable the relay allowance; add this validation/filter parity regression.
+
+10. [major] [domain.rb:103](/Users/javi/GitHub/nondisposable-b/lib/nondisposable/domain.rb:103): Punycode conversion performs quadratic work before checking DNS length limits. A 4,000-distinct-character label took approximately 1.8 seconds; larger signup inputs or source lines can occupy workers far longer. Fix: reject impossible domain/label lengths before entering the encoder.
+
+11. [major] [source_fetcher.rb:47](/Users/javi/GitHub/nondisposable-b/lib/nondisposable/source_fetcher.rb:47): The deadline is checked only after a body chunk arrives. An upstream trickling HTTP headers within each read timeout can hold the job indefinitely, preventing subsequent sources from refreshing. Fix: enforce an absolute timeout across connection establishment, headers, and body; test stalled headers.
+
+12. [minor] [domain.rb:73](/Users/javi/GitHub/nondisposable-b/lib/nondisposable/domain.rb:73): NFC leaves fullwidth Latin characters unmapped. `ｔｅｍｐｍａｉｌ.com` becomes `xn--mi7chanmcau3a.com`, bypassing an ASCII `tempmail.com` listing despite IDNA compatibility mapping identifying the same host. Fix: apply appropriate IDNA compatibility mapping and add normalization vectors.
+
+**Top 3 to fix:** 1 — PSL boundaries; 2 — rollback fallback; 3 — persistent rollback quarantine.

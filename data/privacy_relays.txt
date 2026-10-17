@@ -1,0 +1,42 @@
+# Privacy relays: forwarding addresses in front of a REAL, long-lived inbox.
+#
+# They are not throwaways (the person behind one gets your email for as long as
+# they keep the alias), but they do let one person hold many addresses. Whether
+# that is acceptable is a policy decision, so it is a setting:
+#
+#   config.block_privacy_relays = false  # default: relays are ALLOWED, even if a source lists them
+#   config.block_privacy_relays = true   # relays are REFUSED, even if no source lists them
+#
+# Each domain covers its subdomains (addy.io hands out `alias@username.anonaddy.com`).
+# Source: disposable/disposable `mailservices.json` (MIT), entries with
+# "type": "forwarding", plus Apple's Hide My Email.
+
+# Apple Hide My Email
+privaterelay.appleid.com
+
+# DuckDuckGo Email Protection
+duck.com
+
+# Firefox Relay
+mozmail.com
+
+# addy.io (formerly AnonAddy)
+addy.io
+anonaddy.com
+anonaddy.me
+
+# SimpleLogin (Proton), including Proton Pass aliases
+simplelogin.com
+simplelogin.fr
+simplelogin.co
+simplelogin.io
+silomails.com
+slmails.com
+aleeas.com
+slmail.me
+8shield.net
+dralias.com
+passinbox.com
+passfwd.com
+passmail.com
+passmail.net

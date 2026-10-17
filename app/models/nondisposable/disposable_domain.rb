@@ -4,52 +4,71 @@ module Nondisposable
   class DisposableDomain < ApplicationRecord
     validates :name, presence: true, uniqueness: { case_sensitive: false }
 
-    # How many leading labels the parent-domain walk strips when
-    # check_parent_domains is enabled: user@a.b.c.tempmail.com is checked as
-    # a.b.c.tempmail.com, b.c.tempmail.com, c.tempmail.com and tempmail.com.
-    #
-    # Trade-off (documented instead of pulling in a full public-suffix-list
-    # dependency): the walk never queries single-label suffixes (bare TLDs like
-    # "com"), but without a PSL it cannot tell that multi-label suffixes like
-    # "co.uk" are public — those candidates are harmless unless a public suffix
-    # is deliberately added to the list. Conversely, a throwaway address nested
-    # more than 3 labels below a listed domain escapes the walk; blocklisted
-    # domains are registrable domains, so 3 levels covers practical abuse.
+    # Kept so code that referenced it still loads; no longer used. Until 0.6.0
+    # the parent walk stopped after this many labels, which let anybody who
+    # controls a listed domain escape it with `a.b.c.d.tempmail.com`. The walk
+    # now covers every parent down to the registrable domain: DNS itself caps
+    # a name at 253 characters, so the candidate list is bounded anyway.
     PARENT_MATCH_DEPTH = 3
 
+    # Kept (and equal to Domain::MAX_RAW_LENGTH) for code that referenced it.
+    # The raw-length bound itself now lives in Domain.normalize, which applies
+    # it AFTER stripping invisible characters: judging raw length here let
+    # padding hide a listed domain.
+    MAX_INPUT_LENGTH = Nondisposable::Domain::MAX_RAW_LENGTH
+
     class << self
+      # Whether `domain` is disposable, according to the precedence table in
+      # Nondisposable::Precedence: host exclusions, then the bundled
+      # never-disposable list, then host additions, then the privacy-relay
+      # policy, and only then this table.
       def disposable?(domain)
-        return false if domain.blank?
+        # A name longer than DNS allows (over 253 characters or a label over
+        # 63 once canonical, or over 1,024 code points of raw input after
+        # invisible characters are stripped) is TRUE: it can never be a
+        # deliverable domain, and a check whose job is keeping junk out must
+        # not call junk fine. Judged by Domain.too_long?, never on the raw
+        # length: a raw cap let invisible padding (U+00AD x 1013 +
+        # "tempmail.com") hide a listed name. Domain.normalize bounds its own
+        # work on oversized input, so the parent walk below never runs on one.
+        raw = domain
+        return false if raw.to_s.strip.empty?
+        return true if Nondisposable::Domain.too_long?(raw)
 
-        domain = domain.to_s.downcase
-        config = Nondisposable.configuration
-        candidates = match_candidates(domain)
+        domain = Nondisposable::Domain.normalize(raw)
+        return false if domain.empty?
+        # Not UTF-8: no list holds it and no mail server can deliver to it.
+        return false if domain.encoding == Encoding::BINARY && !domain.ascii_only?
 
-        additional = config.additional_domains.map { |d| d.to_s.downcase }
-        return true if (candidates & additional).any? # rubocop compat: Array#intersect? needs Ruby >= 3.1, gem supports 3.0
+        verdict, candidates = Nondisposable::Precedence.decide(domain, match_candidates(domain))
+        return verdict == :block unless verdict == :lookup
 
-        excluded = config.excluded_domains.map { |d| d.to_s.downcase }
-        # An exact exclusion always wins, so a specific subdomain can be
-        # allowlisted even when a parent domain is on the list.
-        return false if excluded.include?(domain)
+        # Rows written before 0.5.0 stored a unicode domain as it came
+        # (lowercased, not punycode). Match that spelling of every candidate
+        # still eligible, so upgrading never unblocks them; the next publish
+        # rewrites them canonically.
+        legacy = Nondisposable::Domain.unicode(raw)
+        unless legacy == domain || legacy.ascii_only?
+          candidates |= match_candidates(legacy).select { |name| candidates.include?(Nondisposable::Domain.normalize(name)) }
+        end
 
-        where(name: candidates - excluded).exists?
+        candidates.any? && where(name: candidates).exists? # one WHERE name IN (...)
       end
 
-      # The exact domain plus up to PARENT_MATCH_DEPTH parent domains,
-      # never descending below two labels (bare TLDs are never candidates).
+      # With check_parent_domains (the default): the domain and EVERY parent
+      # down to, and including, its registrable domain:
+      #
+      #   a.b.c.d.tempmail.com => a.b.c.d.tempmail.com … d.tempmail.com, tempmail.com
+      #
+      # Never above the registrable domain: past it lie public suffixes (`com`,
+      # `co.uk`) and names like `sch.uk` that sit above a wildcard suffix
+      # (`*.sch.uk`), all belonging to unrelated registrants. Without
+      # check_parent_domains: the domain alone. Expects a normalized domain.
       def match_candidates(domain)
-        return [domain] unless Nondisposable.configuration.check_parent_domains
+        namespace = Nondisposable::Precedence.namespace(domain)
+        return namespace if Nondisposable.configuration.check_parent_domains
 
-        labels = domain.split('.')
-        candidates = [domain]
-        1.upto(PARENT_MATCH_DEPTH) do |depth|
-          parent = labels.drop(depth)
-          break if parent.size < 2
-
-          candidates << parent.join('.')
-        end
-        candidates
+        namespace.first(1)
       end
     end
 

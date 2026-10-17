@@ -86,6 +86,68 @@ class NondisposableSuggestionTest < NondisposableTestCase
     end
   end
 
+  # =========================================================================
+  # The ranker: what one edit cannot tell apart (since 0.5.0)
+  # =========================================================================
+
+  def test_short_provider_names_only_take_edits_after_the_name
+    # me, ya, aol, mail, live: one edit inside a name this short is usually
+    # somebody else's real domain (General Electric, EA, bol.com, Mil.ru…).
+    %w[ge.com ml.com mi.com ea.com aa.com bol.com uol.com one.com mil.ru love.com hive.com].each do |domain|
+      assert_nil Nondisposable::Suggestion.correct_domain(domain), "#{domain} must not be called a typo"
+    end
+    # The ending is still fair game.
+    assert_equal "me.com", Nondisposable::Suggestion.correct_domain("me.cmo")
+    assert_equal "live.com", Nondisposable::Suggestion.correct_domain("live.cm")
+  end
+
+  def test_a_letter_from_across_the_keyboard_is_a_different_word
+    %w[grail.com pmail.com qmail.com].each do |domain|
+      assert_nil Nondisposable::Suggestion.correct_domain(domain), "#{domain} is not a finger slip"
+    end
+    assert_equal "gmail.com", Nondisposable::Suggestion.correct_domain("gnail.com")   # n is beside m
+    assert_equal "hotmail.com", Nondisposable::Suggestion.correct_domain("hotnail.com")
+  end
+
+  def test_valid_alternative_endings_are_not_slips
+    # Yahoo Australia and Google's web.dev are real; .au is not a slip for
+    # .ar, nor .dev for .de.
+    assert_nil Nondisposable::Suggestion.correct_domain("yahoo.com.au")
+    assert_nil Nondisposable::Suggestion.correct_domain("web.dev")
+    assert_nil Nondisposable::Suggestion.correct_domain("yahoo.in")
+  end
+
+  def test_dropping_the_first_letter_spells_other_peoples_domains
+    # cloud.com, aver.com and mail.ch are icloud, naver and gmail.ch without
+    # their first letter — and all three are real.
+    %w[cloud.com aver.com mail.ch].each do |domain|
+      assert_nil Nondisposable::Suggestion.correct_domain(domain)
+    end
+  end
+
+  def test_extra_vowels_and_doubled_letters_are_slips
+    assert_equal "gmail.com", Nondisposable::Suggestion.correct_domain("gmmail.com")
+    assert_equal "gmail.com", Nondisposable::Suggestion.correct_domain("gamail.com")
+  end
+
+  def test_an_accent_is_the_same_key
+    assert_equal "gmail.com", Nondisposable::Suggestion.correct_domain("gmaíl.com")
+    assert_equal "hotmail.com", Nondisposable::Suggestion.correct_domain("hotmaíl.com")
+  end
+
+  def test_a_reviewed_typo_is_corrected_even_where_the_ranker_would_stay_silent
+    # jmail.com: j is not beside g, so the ranker alone says nothing — but it
+    # is a reviewed typo (data/known_typo_domains.txt), so the list answers.
+    assert_nil Nondisposable::Suggestion.guess("jmail.com")
+    assert_equal "gmail.com", Nondisposable::Suggestion.correct_domain("jmail.com")
+  end
+
+  def test_subdomains_and_country_second_levels_are_left_alone
+    %w[alumnos.upm.es correo.ugr.es bbc.co.uk empresa.com.es loja.com.br].each do |domain|
+      assert_nil Nondisposable::Suggestion.correct_domain(domain), "#{domain} is not a typo"
+    end
+  end
+
   def test_returns_nil_for_input_it_cannot_read
     assert_nil Nondisposable.suggestion_for(nil)
     assert_nil Nondisposable.suggestion_for("")

@@ -2,11 +2,20 @@
 
 require_relative "nondisposable/version"
 require_relative "nondisposable/engine"
+require_relative "nondisposable/domain"
+require_relative "nondisposable/public_suffix"
+require_relative "nondisposable/precedence"
+require_relative "nondisposable/source"
+require_relative "nondisposable/source_merge"
+require_relative "nondisposable/source_fetcher"
 require_relative "nondisposable/tld"
+require_relative "nondisposable/known_typos"
 require_relative "nondisposable/suggestion"
+require_relative "nondisposable/confirmable_email"
 require_relative "nondisposable/email_validator"
 require_relative "nondisposable/domain_list_updater"
 require_relative "nondisposable/tld_list_updater"
+require_relative "nondisposable/public_suffix_list_updater"
 
 module Nondisposable
   class Error < StandardError; end
@@ -27,10 +36,12 @@ module Nondisposable
   end
 
   def self.disposable?(email)
-    return false if email.nil? || !email.include?('@')
-    domain = email.to_s.split('@').last
-    return false if domain.nil? || domain.empty?
-    DisposableDomain.disposable?(domain.downcase)
+    return false if email.nil? || !email.to_s.include?('@')
+    # Unicode form: DisposableDomain canonicalises it itself, and needs the
+    # unencoded spelling to match rows stored before 0.5.0.
+    domain = Domain.from_email(email, unicode: true)
+    return false if domain.empty?
+    DisposableDomain.disposable?(domain)
   end
 
   # Does this address end in a TLD that actually exists?
@@ -58,13 +69,34 @@ module Nondisposable
 
   class Configuration
     ON_CHECK_FAILURE_MODES = [:allow, :reject].freeze
+    LOOKALIKE_MODES = [false, true, :confirmable].freeze
 
     attr_accessor :error_message, :additional_domains, :excluded_domains
     # Whether to also match parent domains: with the default true, an email at
-    # x.tempmail.com is blocked when tempmail.com is on the list (checks up to
-    # DisposableDomain::PARENT_MATCH_DEPTH parent labels, never a bare TLD).
+    # x.tempmail.com is blocked when tempmail.com is on the list (checks
+    # every parent down to the registrable domain, never a public suffix).
     attr_accessor :check_parent_domains
     attr_reader :on_check_failure
+
+    # ---- Blocklist sources (Nondisposable::Source) --------------------------
+
+    # Where the list of disposable domains comes from: an ordered list of
+    # Nondisposable::Source objects (or Hashes of their attributes). The
+    # default is the single list this gem has always used, so upgrading changes
+    # nothing. Nondisposable::Sources::RECOMMENDED adds a second, independent
+    # primary. Needs the nondisposable_source_snapshots table
+    # (`rails g nondisposable:upgrade`); without it only the default is used.
+    attr_accessor :sources
+
+    # How many independent ORIGINS must list a domain before a :corroborating
+    # source's entry is blocked. Copies don't count: see Nondisposable::Source.
+    attr_accessor :corroboration_threshold
+
+    # Privacy relays (Apple Hide My Email, DuckDuckGo, Firefox Relay,
+    # SimpleLogin, addy.io — data/privacy_relays.txt) forward to a real,
+    # long-lived inbox. false (the default) ALLOWS them even when an upstream
+    # list carries them; true REFUSES them even when none does.
+    attr_accessor :block_privacy_relays
 
     # ---- TLD validity (Nondisposable::Tld) ----------------------------------
 
@@ -93,15 +125,21 @@ module Nondisposable
 
     # ---- Lookalike domains (Nondisposable::Suggestion) ----------------------
 
-    # Reject addresses one edit away from a well-known provider — `gmail.co`,
+    # Flag addresses one edit away from a well-known provider — `gmail.co`,
     # `gmial.com`, `hotmial.com` — with a message naming the correction.
     #
-    # OFF by default and worth leaving off unless you have thought about it: a
-    # suggestion is a guess about intent, and a wrong guess here stops a real
-    # person signing up with their real address. `Nondisposable.suggestion_for`
-    # is always available and blocks nothing, which is the gentler way to use
-    # this: show the hint, let the human decide.
-    attr_accessor :reject_lookalike_domains
+    #   false        (default) never flag; Nondisposable.suggestion_for still works
+    #   :confirmable flag them. Reviewed typos (data/known_typo_domains.txt) are
+    #                refused outright; every other lookalike is a guess, and the
+    #                user can confirm the address as typed and pass — see
+    #                Nondisposable::ConfirmableEmail.
+    #   true         the same as :confirmable. Before 0.5.0 it refused every
+    #                lookalike, including real organisations' domains (ge.com,
+    #                bol.com, one.com…) one edit from a provider.
+    #
+    # Worth leaving off unless your form can show the confirmation: without it a
+    # user at a domain that merely looks like a typo has no way through.
+    attr_reader :reject_lookalike_domains
 
     # How many edits still count as "a typo". 1 (the default) is the distance at
     # which acting on a guess is safe; at 2, genuinely different domains start
@@ -125,6 +163,10 @@ module Nondisposable
       @excluded_domains = []
       @on_check_failure = :allow
       @check_parent_domains = true
+
+      @sources = Nondisposable::Sources::DEFAULT
+      @corroboration_threshold = 2
+      @block_privacy_relays = false
 
       @check_tld = false
       @additional_tlds = []
@@ -151,6 +193,19 @@ module Nondisposable
       end
 
       @on_check_failure = mode
+    end
+
+    # Strings are accepted for config loaded from YAML/ENV ("confirmable",
+    # "true"); anything else raises, so a typo in an initializer fails at boot
+    # instead of silently meaning "on".
+    def reject_lookalike_domains=(mode)
+      mode = false if mode.nil?
+      mode = { 'true' => true, 'false' => false }.fetch(mode, mode.to_sym) if mode.is_a?(String)
+      unless LOOKALIKE_MODES.include?(mode)
+        raise ArgumentError, "reject_lookalike_domains must be one of #{LOOKALIKE_MODES.map(&:inspect).join(', ')} (got #{mode.inspect})"
+      end
+
+      @reject_lookalike_domains = mode
     end
   end
 end

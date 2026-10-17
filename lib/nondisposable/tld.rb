@@ -156,10 +156,15 @@ module Nondisposable
 
       private
 
-      # The domain half, trimmed, downcased, and without the trailing dot a
-      # fully-qualified name may carry (`gmail.com.` is the same host).
+      # The domain half in Nondisposable::Domain's canonical form, minus the
+      # punycode step: trimmed, downcased, no trailing root dot, fullwidth and
+      # ideographic dots read as dots (`foo．tk` ends in `tk`, exactly like
+      # `foo.tk`). Unicode TLDs stay unicode, so #valid? still declines to
+      # judge them.
       def normalize(email_or_domain)
-        email_or_domain.to_s.split('@').last.to_s.strip.downcase.delete_suffix('.')
+        value = email_or_domain.to_s
+        value = value.b unless value.valid_encoding? # unreadable bytes must not raise
+        Nondisposable::Domain.unicode(value.split('@').last.to_s)
       end
 
       # Skips IANA's comment header and any blank lines.

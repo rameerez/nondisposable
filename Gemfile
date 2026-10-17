@@ -15,4 +15,6 @@ group :test do
   gem "webmock", "~> 3.19"
   gem "sqlite3", "~> 2.1"
   gem "simplecov", require: false
+  # Reads the lookalike corpus fixture; a bundled (not default) gem since Ruby 3.4.
+  gem "csv"
 end

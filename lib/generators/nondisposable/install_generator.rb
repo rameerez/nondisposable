@@ -16,6 +16,7 @@ module Nondisposable
 
       def create_migration_file
         migration_template 'create_nondisposable_disposable_domains.rb.erb', File.join(db_migrate_path, "create_nondisposable_disposable_domains.rb")
+        migration_template 'create_nondisposable_source_snapshots.rb.erb', File.join(db_migrate_path, "create_nondisposable_source_snapshots.rb")
       end
 
       def create_initializer

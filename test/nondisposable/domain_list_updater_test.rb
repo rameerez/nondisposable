@@ -395,7 +395,9 @@ class DomainListUpdaterTest < NondisposableTestCase
   end
 
   def test_handles_very_long_domain_names
-    long_domain = "a" * 200 + ".com"
+    # Four 50-character labels: as long as a real name gets (DNS caps a label
+    # at 63 characters and a name at 253; longer entries are dropped as junk).
+    long_domain = (["a" * 50] * 4).join(".") + ".com"
     stub_domain_list("#{long_domain}\n")
 
     Nondisposable::DomainListUpdater.update
@@ -445,9 +447,14 @@ class DomainListUpdaterTest < NondisposableTestCase
 
     assert Nondisposable::DomainListUpdater.seed
 
-    bundled_size = File.readlines(Nondisposable::DomainListUpdater::BUNDLED_LIST_PATH, chomp: true).uniq.size
-    assert_equal bundled_size, Nondisposable::DisposableDomain.count
+    bundled = File.readlines(Nondisposable::DomainListUpdater::BUNDLED_LIST_PATH, chomp: true).uniq
+    # The bundled upstream list carries a couple of real providers (sify.com,
+    # an Indian ISP); the never-disposable list keeps them out of the table.
+    never = bundled.select { |d| Nondisposable::Precedence.namespace_hit(d, Nondisposable::Precedence.never_disposable) }
+    assert_operator never.size, :<, 10
+    assert_equal bundled.size - never.size, Nondisposable::DisposableDomain.count
     assert Nondisposable::DisposableDomain.exists?(name: "mailinator.com")
+    refute Nondisposable::DisposableDomain.exists?(name: "sify.com")
   end
 
   def test_seed_is_a_noop_when_table_is_populated
