@@ -19,6 +19,7 @@ More than one blocklist, without trusting any of them more than it has earned. T
 
 ### Changed
 
+- ⚠️ **`DisposableDomain.disposable?` / `Nondisposable.disposable?` answer `true` for a name longer than DNS allows** (`Domain.too_long?`: over 253 characters or a label over 63 once canonical, or over 1,024 code points of raw input after stripping invisible characters). Such a name can never be deliverable, and a check that keeps junk out must not call it fine. Names exactly at the limits are judged normally. The validator rejects them earlier with `invalid_tld_error_message`.
 - ⚠️ **Precedence**: one table, applied both when checking and when building the list: `excluded_domains` > `never_disposable` > `additional_domains` > privacy-relay policy > sources. Before, `additional_domains` was checked first, so a domain in both `additional_domains` and `excluded_domains` was **blocked**; it is now **allowed**. `additional_domains` can no longer block a real provider listed in `never_disposable` (ignored with a warning).
 - ⚠️ Two domains the default upstream list carries are **no longer blocked**: `sify.com` (Indian ISP) and `21cn.com` (China Telecom webmail).
 - Entries that cannot be DNS names (labels over 63 characters, names over 253, IP addresses, HTML) are dropped from downloaded lists. The single-source path also refuses a payload with more than 1% such lines instead of storing it.

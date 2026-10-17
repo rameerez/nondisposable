@@ -16,9 +16,6 @@ module Nondisposable
     # it AFTER stripping invisible characters: judging raw length here let
     # padding hide a listed domain.
     MAX_INPUT_LENGTH = Nondisposable::Domain::MAX_RAW_LENGTH
-    # DNS caps a name at 253 characters, which also bounds the parent walk
-    # (at most 127 labels).
-    MAX_DOMAIN_LENGTH = 253
 
     class << self
       # Whether `domain` is disposable, according to the precedence table in
@@ -26,14 +23,20 @@ module Nondisposable
       # never-disposable list, then host additions, then the privacy-relay
       # policy, and only then this table.
       def disposable?(domain)
-        # Length is judged on the CANONICAL form only: a raw cap here would let
-        # invisible padding (`"­" * 1013 + "tempmail.com"`) through even
-        # though it normalizes to a listed name. Domain.normalize bounds its own
-        # work on oversized input; past that, no list can hold a name DNS could
-        # never resolve, so the parent walk below never runs on one.
+        # A name longer than DNS allows (over 253 characters or a label over
+        # 63 once canonical, or over 1,024 code points of raw input after
+        # invisible characters are stripped) is TRUE: it can never be a
+        # deliverable domain, and a check whose job is keeping junk out must
+        # not call junk fine. Judged by Domain.too_long?, never on the raw
+        # length: a raw cap let invisible padding (U+00AD x 1013 +
+        # "tempmail.com") hide a listed name. Domain.normalize bounds its own
+        # work on oversized input, so the parent walk below never runs on one.
         raw = domain
+        return false if raw.to_s.strip.empty?
+        return true if Nondisposable::Domain.too_long?(raw)
+
         domain = Nondisposable::Domain.normalize(raw)
-        return false if domain.empty? || domain.length > MAX_DOMAIN_LENGTH
+        return false if domain.empty?
         # Not UTF-8: no list holds it and no mail server can deliver to it.
         return false if domain.encoding == Encoding::BINARY && !domain.ascii_only?
 

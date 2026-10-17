@@ -48,3 +48,15 @@ the 0.4.0 twin rows (`legacy_spellings`):
 
 Verification (clean checkout of the commit): 597 tests, 0 failures (98.31% line / 94.42% branch), plus the
 rails_7.2, rails_8.0 and rails_8.1 appraisals: 597 tests, 0 failures each.
+
+## Over-length domains (lead decision, 2026-10-17)
+
+After A's f44536e (the validator rejects over-length domains, plus the new
+`Domain.too_long?`), direct callers of `DisposableDomain.disposable?` and
+`Nondisposable.disposable?` now get `true` when `Domain.too_long?(domain)`:
+such a name can never be deliverable, and a "keep junk out" check must not
+answer "fine". The check runs before any normalization work or lookup.
+`MAX_DOMAIN_LENGTH` (unreleased) is removed. Three tests that asserted `false`
+were flipped to the decision: one in A's domain_test, two in the round-2
+regressions. `test_names_longer_than_dns_allows_are_disposable` covers over-253,
+a label over 63, and names exactly at both limits (judged normally).

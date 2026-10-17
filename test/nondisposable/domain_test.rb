@@ -57,7 +57,8 @@ class NondisposableDomainTest < NondisposableTestCase
 
     assert_equal "#{huge}.com", normalize("#{huge}.com")
     assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 0.1
-    refute Nondisposable.disposable?("x@#{huge}.com")
+    # Lead decision 2026-10-17: a name DNS cannot hold is junk, so disposable? says so.
+    assert Nondisposable.disposable?("x@#{huge}.com")
   end
 
   def test_blank_and_unreadable_input_is_harmless

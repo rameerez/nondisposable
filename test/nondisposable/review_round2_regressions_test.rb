@@ -158,9 +158,10 @@ class NondisposableReviewRound2Test < NondisposableTestCase
     huge_labels = ("x" * 8_000) + ".tempmail.com"
 
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    refute Nondisposable::DisposableDomain.disposable?(huge)
-    refute Nondisposable::DisposableDomain.disposable?(huge_labels)
-    refute Nondisposable.disposable?("user@#{huge}")
+    # Over-length is junk: TRUE (lead decision 2026-10-17), and cheap.
+    assert Nondisposable::DisposableDomain.disposable?(huge)
+    assert Nondisposable::DisposableDomain.disposable?(huge_labels)
+    assert Nondisposable.disposable?("user@#{huge}")
     assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 0.5
   end
 
@@ -180,7 +181,7 @@ class NondisposableReviewRound2Test < NondisposableTestCase
   def test_oversized_unicode_label_is_cheap
     label = (0x4E00...(0x4E00 + 4_000)).map { |cp| [cp].pack("U") }.join
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    refute Nondisposable.disposable?("user@#{label}.com")
+    assert Nondisposable.disposable?("user@#{label}.com")
     assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 0.5
   end
 
@@ -216,6 +217,24 @@ class NondisposableReviewRound2Test < NondisposableTestCase
     assert_operator padded.length, :>, 1_024
     assert Nondisposable::DisposableDomain.disposable?(padded)
     assert Nondisposable.disposable?("user@#{padded}")
+  end
+
+  # Lead decision 2026-10-17: a name longer than DNS allows can never be
+  # deliverable, so direct callers get TRUE, never "fine". Names exactly at
+  # the limits are judged normally.
+  def test_names_longer_than_dns_allows_are_disposable
+    too_long_total = ((["a" * 50] * 5).join(".")) + ".example.com" # > 253
+    too_long_label = ("b" * 64) + ".example.com"
+
+    assert Nondisposable::DisposableDomain.disposable?(too_long_total)
+    assert Nondisposable::DisposableDomain.disposable?(too_long_label)
+    assert Nondisposable.disposable?("user@#{too_long_label}")
+
+    at_label_limit = ("c" * 63) + ".example.com"
+    at_total_limit = ((["d" * 62] * 3).join(".")) + "." + ("e" * (253 - 3 * 63 - 4)) + ".com"
+    assert_equal 253, at_total_limit.length
+    refute Nondisposable::DisposableDomain.disposable?(at_label_limit)
+    refute Nondisposable::DisposableDomain.disposable?(at_total_limit)
   end
 
   # R3-4: a block_privacy_relays flip compares like with like, and a reset
