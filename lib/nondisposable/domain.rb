@@ -30,7 +30,8 @@ module Nondisposable
   # encoding itself (RFC 3492) is forty lines of arithmetic and this gem ships
   # with no runtime dependencies beyond Rails. What we deliberately do NOT
   # implement is the full IDNA2008/UTS #46 validity table (which code points
-  # are disallowed): we map — NFC, lowercase, the ideographic full stops — and
+  # are disallowed): we map — NFKC, lowercase, the ideographic full stops, the
+  # invisible characters UTS #46 drops — and
   # encode, and leave "is this label legal" to the DNS. For matching that is
   # the right trade: a domain we encode that the registry would have refused
   # cannot be on anybody's list either.
@@ -38,6 +39,12 @@ module Nondisposable
     # The label separators UTS #46 treats as a full stop: ideographic,
     # fullwidth and halfwidth ideographic. A user on a CJK keyboard types these.
     DOTS = /[。．｡]/.freeze
+
+    # Characters UTS #46 maps to nothing: soft hyphen, zero-width space and
+    # joiners, word joiner, BOM, combining grapheme joiner, variation
+    # selectors. Invisible in a form field, so `maili<SHY>nator.com` would
+    # otherwise be a different string from the listed `mailinator.com`.
+    IGNORED = /[­͏᠋-᠍​-‍⁠︀-️﻿]/.freeze
 
     # RFC 3492 §5: the bootstring parameters that make it punycode.
     BASE = 36
@@ -70,7 +77,9 @@ module Nondisposable
       # have no keyboard meaning — `xn--gmal-zqa` is `gmaíl`).
       def unicode(domain)
         value = domain.to_s.strip
-        value = value.unicode_normalize(:nfc) unless value.ascii_only?
+        # NFKC, not NFC: it also folds compatibility forms, so fullwidth
+        # `ｇｍａｉｌ` is `gmail` — the mapping UTS #46 applies before lookup.
+        value = value.gsub(IGNORED, '').unicode_normalize(:nfkc) unless value.ascii_only?
         value.gsub(DOTS, '.').downcase.delete_suffix('.')
       end
 
