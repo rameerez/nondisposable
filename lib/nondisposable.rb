@@ -2,8 +2,11 @@
 
 require_relative "nondisposable/version"
 require_relative "nondisposable/engine"
+require_relative "nondisposable/domain"
 require_relative "nondisposable/tld"
+require_relative "nondisposable/known_typos"
 require_relative "nondisposable/suggestion"
+require_relative "nondisposable/confirmable_email"
 require_relative "nondisposable/email_validator"
 require_relative "nondisposable/domain_list_updater"
 require_relative "nondisposable/tld_list_updater"
@@ -27,10 +30,10 @@ module Nondisposable
   end
 
   def self.disposable?(email)
-    return false if email.nil? || !email.include?('@')
-    domain = email.to_s.split('@').last
-    return false if domain.nil? || domain.empty?
-    DisposableDomain.disposable?(domain.downcase)
+    return false if email.nil? || !email.to_s.include?('@')
+    domain = Domain.from_email(email)
+    return false if domain.empty?
+    DisposableDomain.disposable?(domain)
   end
 
   # Does this address end in a TLD that actually exists?
@@ -58,6 +61,7 @@ module Nondisposable
 
   class Configuration
     ON_CHECK_FAILURE_MODES = [:allow, :reject].freeze
+    LOOKALIKE_MODES = [false, true, :confirmable].freeze
 
     attr_accessor :error_message, :additional_domains, :excluded_domains
     # Whether to also match parent domains: with the default true, an email at
@@ -93,15 +97,21 @@ module Nondisposable
 
     # ---- Lookalike domains (Nondisposable::Suggestion) ----------------------
 
-    # Reject addresses one edit away from a well-known provider — `gmail.co`,
+    # Flag addresses one edit away from a well-known provider — `gmail.co`,
     # `gmial.com`, `hotmial.com` — with a message naming the correction.
     #
-    # OFF by default and worth leaving off unless you have thought about it: a
-    # suggestion is a guess about intent, and a wrong guess here stops a real
-    # person signing up with their real address. `Nondisposable.suggestion_for`
-    # is always available and blocks nothing, which is the gentler way to use
-    # this: show the hint, let the human decide.
-    attr_accessor :reject_lookalike_domains
+    #   false        (default) never flag; Nondisposable.suggestion_for still works
+    #   :confirmable flag them. Reviewed typos (data/known_typo_domains.txt) are
+    #                refused outright; every other lookalike is a guess, and the
+    #                user can confirm the address as typed and pass — see
+    #                Nondisposable::ConfirmableEmail.
+    #   true         the same as :confirmable. Before 0.5.0 it refused every
+    #                lookalike, including real organisations' domains (ge.com,
+    #                bol.com, one.com…) one edit from a provider.
+    #
+    # Worth leaving off unless your form can show the confirmation: without it a
+    # user at a domain that merely looks like a typo has no way through.
+    attr_reader :reject_lookalike_domains
 
     # How many edits still count as "a typo". 1 (the default) is the distance at
     # which acting on a guess is safe; at 2, genuinely different domains start
@@ -151,6 +161,19 @@ module Nondisposable
       end
 
       @on_check_failure = mode
+    end
+
+    # Strings are accepted for config loaded from YAML/ENV ("confirmable",
+    # "true"); anything else raises, so a typo in an initializer fails at boot
+    # instead of silently meaning "on".
+    def reject_lookalike_domains=(mode)
+      mode = false if mode.nil?
+      mode = { 'true' => true, 'false' => false }.fetch(mode, mode.to_sym) if mode.is_a?(String)
+      unless LOOKALIKE_MODES.include?(mode)
+        raise ArgumentError, "reject_lookalike_domains must be one of #{LOOKALIKE_MODES.map(&:inspect).join(', ')} (got #{mode.inspect})"
+      end
+
+      @reject_lookalike_domains = mode
     end
   end
 end

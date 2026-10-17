@@ -20,12 +20,31 @@ module ActiveModel
       # verdict with the fix attached. So whenever we can name a correction we
       # use that message, whether the TLD was invalid or merely lookalike. The
       # rule is: a suggestion, if we have one, always phrases the rejection.
+      #
+      # HARD vs CONFIRMABLE — WHICH LOOKALIKES CAN BE WAVED THROUGH
+      #
+      # A lookalike error is only as strong as the evidence behind it:
+      #
+      #   - Invalid TLD (`gmail.con`, `gmailmcom`): HARD. No mail is delivered to
+      #     a TLD that does not exist, so there is nothing to confirm.
+      #   - Reviewed typo (data/known_typo_domains.txt, `gmial.com`): HARD. Someone
+      #     checked; nobody has a mailbox there.
+      #   - Any other lookalike (`gmail.co`, but also `ge.com` → me.com): a GUESS,
+      #     so CONFIRMABLE. The error is added unless the record says the user
+      #     confirmed the address as typed (Nondisposable::ConfirmableEmail). A
+      #     real `ge.com` employee resubmits once and is never locked out.
+      #
+      # `true` and `:confirmable` mean the same thing. Before 0.5.0 `true` refused
+      # every lookalike outright, which measured against the Tranco top 1M would
+      # have refused staff at General Electric, EA and Aon (see CHANGELOG).
       def validate_each(record, attribute, value)
         return if value.blank?
 
         begin
-          domain = value.to_s.split('@').last&.downcase
-          return if domain.nil? # Invalid email format
+          # Without an "@" the whole value is judged as a domain, as it always
+          # has been — someone who typed only `tempmail.com` is still refused.
+          domain = value.to_s.include?('@') ? Nondisposable::Domain.from_email(value) : Nondisposable::Domain.normalize(value)
+          return if domain.empty? # Invalid email format
 
           config = Nondisposable.configuration
 
@@ -45,13 +64,26 @@ module ActiveModel
           # production-shaped typo that missed the dot), which fails "must end in a real TLD"
           # just as surely as `.con` does.
           tld = Nondisposable::Tld.extract(value)
-          invalid = config.check_tld && (tld.nil? || !Nondisposable::Tld.valid?(tld))
+          impossible = tld.nil? || !Nondisposable::Tld.valid?(tld)
+          invalid = config.check_tld && impossible
           blocked = config.check_tld && !invalid && Nondisposable::Tld.blocked?(tld)
 
           if invalid || config.reject_lookalike_domains
             suggestion = Nondisposable::Suggestion.for(value)
             if suggestion
-              return reject(record, attribute, config.lookalike_error_message.sub('%{suggestion}', suggestion))
+              message = config.lookalike_error_message.sub('%{suggestion}', suggestion)
+              # Hard: no confirmation can make an impossible TLD deliverable —
+              # whether or not the host turned check_tld on, `gmail.con` cannot
+              # receive the confirmation email — and a reviewed typo is not a
+              # guess. The error stays a plain message, exactly as before 0.5.0.
+              return reject(record, attribute, message) if impossible || Nondisposable::KnownTypos.include?(value)
+
+              unless Nondisposable::ConfirmableEmail.confirmed?(record, attribute)
+                # Typed, so a form can tell this error apart and offer the
+                # "yes, this is right" checkbox: errors.of_kind?(:email, :lookalike_domain).
+                record.errors.add(attribute, :lookalike_domain, message: message, suggestion: suggestion)
+                return
+              end
             end
           end
 

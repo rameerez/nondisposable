@@ -13,6 +13,7 @@ group :test do
   gem "webmock", "~> 3.19"
   gem "sqlite3", "~> 2.1"
   gem "simplecov", require: false
+  gem "csv"
 end
 
 gemspec path: "../"
