@@ -60,3 +60,18 @@ answer "fine". The check runs before any normalization work or lookup.
 were flipped to the decision: one in A's domain_test, two in the round-2
 regressions. `test_names_longer_than_dns_allows_are_disposable` covers over-253,
 a label over 63, and names exactly at both limits (judged normally).
+
+## Final codex round on the integration branch: `2026-10-17-integration-codex-final.md`
+
+Run by the session lead on `integrate/0.5-0.6` @ d5d7546 (codex `gpt-6.1-sol`,
+reasoning effort high, read-only). 15796e9 adds regression tests only.
+
+- **Merge resolution:** no unintended loss. Precedence, canonical storage on
+  every write path, legacy lookups respecting exclusions, and the validating
+  `reject_lookalike_domains=` setter all survive.
+- **Round-3 fixes:** 6 of 7 VERIFIED (#5 R3-1, R3-2; #6 R3-1 to R3-4).
+
+| # | Sev | Finding | Decision | Reasoning |
+|---|---|---|---|---|
+| #5 R3-3 | major | A DOWNLOADED unicode entry (`bücher.de`) loses its raw spelling in `Source.parse`, so after a rollback to 0.4.0 the old reader misses it. Host `additional_domains` do get twin rows. | **disclosed** (lead's triage; the owner may overrule) | All six measured sources ship 0 raw-unicode entries (IDNs arrive as `xn--`), and it only matters on a rollback to 0.4.0. A fix would carry raw spellings through `Source.parse` and the snapshots for a case no source produces. The CHANGELOG 0.5.0 caveat states it explicitly. |
+| — | expected | Host smoke: `mail-burn.com` passes under default, RECOMMENDED and confirmable | **expected, documented** | The source-coverage gap measured on 2026-10-17: a single origin, so no precision-first preset blocks it. `additional_domains` blocks it (verified in the smoke test). Workstream C is the long-term answer. |
