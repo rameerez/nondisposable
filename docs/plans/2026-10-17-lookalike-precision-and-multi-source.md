@@ -1,6 +1,6 @@
 # Plan: lookalike precision, multi-source blocklists, and a fresh-domains list
 
-Status: DRAFT for adversarial review (2026-10-17)
+Status: v2, revised after codex adversarial review (docs/plans/2026-10-17-codex-plan-review.md). §6 overrides earlier sections where they conflict.
 Owner: Javi R (rameerez). Trigger: CarHey SMS-pumping incident, 2026-10-16/17.
 
 ## 0. Why
@@ -14,7 +14,7 @@ Two failures surfaced in one incident:
    `amieiro/disposable-email-domains`.
 2. **The lookalike rule is not safe to turn on.** `reject_lookalike_domains`
    (OSA distance ≤ 1 against `data/email_providers.txt`) was replayed against the
-   Tranco top 1M (list fetched 2026-10-17). It flags **698** domains
+   Tranco top 1M (list fetched 2026-10-17). It flags **707** domains
    (`docs/evidence/2026-10-17-tranco-top1m-lookalike-hits.csv`: rank, domain,
    suggestion). Many are real typos/typosquats (`gmial.com`, `gamil.com`,
    `hotmial.com`), but many are large real organisations whose staff would be
@@ -174,3 +174,85 @@ Each step: codex adversarial review of the code, one round, owner triages.
   copy each other (corroboration may be illusory)?
 - Updater: is a provenance column worth a migration for existing hosts?
 - Anything in workstream C that is legally or operationally risky?
+
+## 6. Decisions after adversarial review (v2, these override §1–§3)
+
+Codex review: `docs/plans/2026-10-17-codex-plan-review.md` (18 findings). Triage by
+the session lead; owner can overrule any line.
+
+Reproducibility: Tranco top-1M CSV downloaded 2026-10-17 from
+`https://tranco-list.eu/top-1m.csv.zip` (file dated 2026-10-16, sha256 prefix
+`a166c559bdf76fce`); scan script `docs/evidence/tranco_lookalike_scan.rb`;
+707 unique hits (the 698 in §0 was a partial count, finding 7).
+
+**A. Lookalike: hard reject only what we KNOW is a typo; everything else is confirmable.**
+(findings 1–4, 6)
+- Offline we cannot tell `ge.com` from `gmial.com` with certainty, so no rule
+  derived from a corpus may hard-reject an unseen domain.
+- New mode `config.reject_lookalike_domains = :confirmable` (keep `false` default,
+  keep `true` meaning "reject" for backward compatibility, but its behaviour becomes
+  the safe one below):
+  1. **Hard reject** when the domain is in bundled `data/known_typo_domains.txt`
+     (reviewed `typo` labels with evidence) or is an invalid-TLD typo (already
+     shipped).
+  2. **Confirmable** for any other lookalike: the validator adds the suggestion
+     error unless the record carries a confirmation (virtual attribute set by the
+     host's "Sí, es correcto" checkbox/resubmit; gem ships a small concern
+     `Nondisposable::ConfirmableEmail` + docs). A real `ge.com` user resubmits once,
+     never locked out.
+  3. Typo model (short-label guard, adjacency) is used only to RANK/limit what
+     becomes a suggestion, never to justify a hard reject.
+  4. Valid alternative suffixes (`yahoo.com.au` vs `.ar`, `web.dev` vs `web.de`) are
+     never hard-rejected (they are real domains) → at most confirmable.
+- Evaluation (finding 1): corpus split into a labelled set and an untouched
+  holdout BEFORE tuning; report precision/recall of the suggestion ranker on the
+  holdout; the hard-reject list is evaluated only for provenance (every row has
+  evidence), not used as its own test oracle.
+- Labels (finding 2): website appearance is evidence, not proof. Both directions
+  reviewed. Only entries labelled `typo` with strong evidence (typosquat/parking of a
+  provider's misspelling, redirect to the provider, registered by a known
+  typosquatter, no mailbox service) enter `known_typo_domains.txt`. Uncertain →
+  not listed (stays confirmable).
+- Canonicalization (finding 6): one `Nondisposable::Domain.normalize` used by
+  config, ingestion, `disposable?`, TLD and suggestion paths: strip, downcase,
+  trailing dot, IDNA to ASCII (punycode) for matching, never touch the local part.
+- CarHey enables `:confirmable` with a UI checkbox after 0.5.0.
+
+**B. Multi-source (findings 5, 8–14): accepted in full, simplified where possible.**
+- PSL validation on every ingestion path and on `additional_domains`: reject public
+  suffixes (bundle a PSL snapshot; no runtime network).
+- Sources declare lineage (`derived_from:`). Corroboration counts distinct ORIGINS
+  (`disposable/disposable` imports mailchecker/fakefilter/wesbos → it does not add a
+  vote for entries those already carry).
+- Precedence table (one place, enforced in validation and seeding):
+  `excluded_domains` (host) > bundled `never_disposable.txt` (real providers, ISPs)
+  > `additional_domains` (host) > relay policy (`block_privacy_relays`, relays live
+  in their own list, NOT in never_disposable) > merged sources.
+  Note: today `additional_domains` beats exclusions; this flips it for the bundled
+  never-list only, host exclusions already… — implementer: write the table into
+  README and tests, call out the change in CHANGELOG.
+- Snapshots: new table `nondisposable_source_snapshots` (source, fetched_at,
+  sha256, domain_count, status, domains text) via an ADDITIVE upgrade migration
+  generator; the merged `disposable_domains` table is rebuilt from the last good
+  snapshot of each source inside one transaction, under an advisory lock
+  (serialized publish + seed). Hosts without the new table keep today's
+  single-source behaviour (rolling deploy safe).
+- Guards: canonical-unique count; streamed byte cap + total deadline; additions
+  and removals diffed and logged; a never_disposable domain appearing in any source
+  is dropped and logged as a poison signal; first run with all primaries failed →
+  keep seed, never publish empty.
+- Excluded source: amieiro (no licence, 28 FPs).
+
+**C. Fresh-domains repo (findings 15–17): quarantine-first; design + scaffold only.**
+- Discoveries land in `quarantine/`, never in `domains.txt`, until a proof of
+  inbox capability exists: a probe mail from a mailbox WE control arrives in the
+  generator's UI for that domain (recorded with run ID + artifact hashes).
+- Evidence bound to run IDs and sha256 of artifacts; entries re-validated every 30
+  days; withdrawal path documented; budgets (max candidates/run, runtime, storage).
+- Legal: per-generator ToS review recorded in `generators.yml`; screenshots crop to
+  the address widget (no inbox contents); upstream lists are NOT re-licensed, only
+  our own observations are CC0; attribution kept.
+- Not published until the owner approves the name and the first evidence batch.
+
+Order unchanged: A → B → C. Each implementation gets one codex code review round;
+the session lead triages; owner decides releases.
