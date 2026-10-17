@@ -31,7 +31,7 @@ module Nondisposable
   # with no runtime dependencies beyond Rails. What we deliberately do NOT
   # implement is the full IDNA2008/UTS #46 validity table (which code points
   # are disallowed): we map — NFKC, lowercase, the ideographic full stops, the
-  # invisible characters UTS #46 drops — and
+  # invisible characters UTS #46 drops (nontransitionally: ZWJ/ZWNJ stay) — and
   # encode, and leave "is this label legal" to the DNS. For matching that is
   # the right trade: a domain we encode that the registry would have refused
   # cannot be on anybody's list either.
@@ -40,11 +40,28 @@ module Nondisposable
     # fullwidth and halfwidth ideographic. A user on a CJK keyboard types these.
     DOTS = /[。．｡]/.freeze
 
-    # Characters UTS #46 maps to nothing: soft hyphen, zero-width space and
-    # joiners, word joiner, BOM, combining grapheme joiner, variation
-    # selectors. Invisible in a form field, so `maili<SHY>nator.com` would
-    # otherwise be a different string from the listed `mailinator.com`.
-    IGNORED = /[­͏᠋-᠍​-‍⁠︀-️﻿]/.freeze
+    # Every code point UTS #46 maps to nothing ("ignored" in
+    # IdnaMappingTable.txt, Unicode 2026-06-29): soft hyphen, combining
+    # grapheme joiner, Hangul and Khmer fillers, Mongolian variation selectors,
+    # zero-width space, word joiner and invisible operators, variation
+    # selectors 1–256, BOM, shorthand format controls, musical beam controls.
+    # Invisible in a form field, so `maili<SHY>nator.com` would otherwise be a
+    # different string from the listed `mailinator.com` — while a mail server
+    # applying IDNA would deliver it to mailinator.com.
+    #
+    # ZWNJ and ZWJ (U+200C/D) are deliberately NOT here. UTS #46 lists them as
+    # "deviation" characters, and nontransitional processing (IDNA2008, what
+    # registries and browsers use) keeps them: `نامه‌ای.com` with a ZWNJ is a
+    # different registered domain from the same letters without one.
+    IGNORED = /[­͏ᅟᅠ឴឵᠋-᠏​⁠-⁤⁪-⁯ㅤ︀-️﻿ﾠ\u{1BCA0}-\u{1BCA3}\u{1D173}-\u{1D17A}\u{E0100}-\u{E01EF}]/.freeze
+
+    # DNS caps a name at 253 octets (RFC 1035 §2.3.4). Anything longer, once
+    # the invisible characters are gone, cannot be a registered domain, so it
+    # skips NFKC and punycode: both are superlinear on hostile input (combining
+    # marks to reorder, distinct code points to encode) and their answer could
+    # not match a stored row anyway.
+    MAX_LENGTH = 253
+    MAX_LABEL_LENGTH = 63
 
     # RFC 3492 §5: the bootstring parameters that make it punycode.
     BASE = 36
@@ -62,31 +79,37 @@ module Nondisposable
       # never nil, so callers can chain without guarding.
       def normalize(domain)
         value = unicode(domain)
-        return value if value.ascii_only?
-        # DNS caps a name at 253 octets and a label at 63, and the encoder
-        # below is quadratic in the distinct code points of a label — so a
-        # 4,000-character label typed into a signup form (or shipped in a
-        # downloaded list) would cost seconds. Nothing that long can be a
-        # registered domain or match a stored row; hand it back unencoded.
-        return value if value.length > 253 || value.split('.', -1).any? { |label| label.length > 63 }
+        return value if value.ascii_only? || value.encoding == Encoding::BINARY
+        # The punycode encoder is quadratic in the distinct code points of a
+        # label: a 4,000-character label would cost seconds. Over DNS's limits
+        # it cannot be a registered domain; hand it back unencoded.
+        return value if oversized?(value)
 
         value.split('.', -1).map { |label| label.ascii_only? ? label : "xn--#{punycode(label)}" }.join('.')
-      rescue ArgumentError, Encoding::CompatibilityError
-        # Bytes that are not valid UTF-8 cannot be a domain anybody typed; keep
-        # a stable, comparable form instead of raising inside a validator.
-        domain.to_s.b.strip.downcase.delete_suffix('.')
       end
 
       # The same canonicalisation WITHOUT the punycode step, for code that
       # compares what a human typed (the suggestion layer: a keyboard slip is a
       # distance between the characters someone pressed, and punycode letters
-      # have no keyboard meaning — `xn--gmal-zqa` is `gmaíl`).
+      # have no keyboard meaning — `xn--gmal-zqa` is `gmaíl`). Never raises.
       def unicode(domain)
-        value = domain.to_s.strip
+        value = utf8(domain.to_s)
+        # Bytes that are not UTF-8 cannot be a domain anybody typed: keep a
+        # stable, comparable binary form instead of raising inside a validator.
+        return value.strip.downcase.delete_suffix('.') if value.encoding == Encoding::BINARY
+
+        value = value.strip
+        return value.downcase.delete_suffix('.') if value.ascii_only?
+
+        # Linear passes first, so the length bound below sees what is left once
+        # the invisible padding is gone (300 soft hyphens around
+        # mailinator.com must not buy an exemption).
+        value = value.gsub(IGNORED, '').gsub(DOTS, '.')
+        return value.downcase.delete_suffix('.') if oversized?(value)
+
         # NFKC, not NFC: it also folds compatibility forms, so fullwidth
         # `ｇｍａｉｌ` is `gmail` — the mapping UTS #46 applies before lookup.
-        value = value.gsub(IGNORED, '').unicode_normalize(:nfkc) unless value.ascii_only?
-        value.gsub(DOTS, '.').downcase.delete_suffix('.')
+        value.unicode_normalize(:nfkc).gsub(DOTS, '.').downcase.delete_suffix('.')
       end
 
       # The domain half of an address, normalised. Splits on the LAST "@", so a
@@ -94,14 +117,34 @@ module Nondisposable
       # right domain. "" when there is no "@" or nothing after it. An empty
       # local part (`@tempmail.com`) still has a domain worth judging, so it
       # is not this method's place to refuse it.
-      def from_email(email)
-        _local, at, domain = email.to_s.rpartition('@')
+      #
+      # `unicode: true` returns the #unicode form instead of the punycode one:
+      # what DisposableDomain needs to also match rows 0.4.0 stored unencoded.
+      def from_email(email, unicode: false)
+        email = email.to_s
+        email = email.b unless email.valid_encoding? # unreadable bytes must not raise
+        _local, at, domain = email.rpartition('@')
         return '' if at.empty?
 
-        normalize(domain)
+        unicode ? unicode(domain) : normalize(domain)
       end
 
       private
+
+      # A String in UTF-8 when its bytes are UTF-8, whatever encoding it was
+      # labelled with: a form param or a log line handed over as ASCII-8BIT is
+      # still `bücher.de`, and 0.4.0 accepted it without raising.
+      def utf8(value)
+        return value if value.encoding == Encoding::UTF_8 && value.valid_encoding?
+
+        copy = value.dup.force_encoding(Encoding::UTF_8)
+        copy.valid_encoding? ? copy : value.b # BINARY: "not UTF-8"
+      end
+
+      def oversized?(value)
+        value.length > MAX_LENGTH || value.split('.', -1).any? { |label| label.length > MAX_LABEL_LENGTH }
+      end
+
 
       # RFC 3492 §6.3, the encoder only: we never need to decode.
       def punycode(label)

@@ -29,11 +29,23 @@ module Nondisposable
         # walking parents, because the input is whatever a signup form sent.
         return false if domain.to_s.length > MAX_INPUT_LENGTH
 
-        domain = Nondisposable::Domain.normalize(domain)
+        raw = domain
+        domain = Nondisposable::Domain.normalize(raw)
         return false if domain.empty? || domain.length > MAX_DOMAIN_LENGTH
+        # Not UTF-8: no list holds it and no mail server can deliver to it.
+        return false if domain.encoding == Encoding::BINARY && !domain.ascii_only?
 
         verdict, candidates = Nondisposable::Precedence.decide(domain, match_candidates(domain))
         return verdict == :block unless verdict == :lookup
+
+        # Rows written before 0.5.0 stored a unicode domain as it came
+        # (lowercased, not punycode). Match that spelling of every candidate
+        # still eligible, so upgrading never unblocks them; the next publish
+        # rewrites them canonically.
+        legacy = Nondisposable::Domain.unicode(raw)
+        unless legacy == domain || legacy.ascii_only?
+          candidates |= match_candidates(legacy).select { |name| candidates.include?(Nondisposable::Domain.normalize(name)) }
+        end
 
         candidates.any? && where(name: candidates).exists? # one WHERE name IN (...)
       end

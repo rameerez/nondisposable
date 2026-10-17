@@ -189,4 +189,21 @@ class NondisposableReviewRound2Test < NondisposableTestCase
     setup_disposable_domain!("tempmail.com")
     assert Nondisposable.disposable?("user@ｔｅｍｐｍａｉｌ.com")
   end
+  # Carried over from PR #5 (its round-2 #5): rows a 0.4.0 table stored in
+  # unicode still block, and exclusions still apply to them.
+  def test_legacy_unicode_rows_still_block
+    Nondisposable::DisposableDomain.insert_all([{ name: "bücher.de" }], record_timestamps: true)
+
+    assert Nondisposable::DisposableDomain.disposable?("bücher.de")
+    assert Nondisposable::DisposableDomain.disposable?("x.Bücher.de")
+    refute Nondisposable::DisposableDomain.disposable?("xn--bcher-kva.de"), "only a unicode address can match a unicode row"
+
+    Nondisposable.configuration.excluded_domains = ["xn--bcher-kva.de"]
+    refute Nondisposable::DisposableDomain.disposable?("bücher.de")
+  end
+
+  def test_non_utf8_domains_are_never_disposable
+    setup_disposable_domain!("tempmail.com")
+    refute Nondisposable::DisposableDomain.disposable?("\xFF\xFE.tempmail.com".b)
+  end
 end
