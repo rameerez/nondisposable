@@ -39,15 +39,17 @@ Nondisposable.configure do |config|
   # customer you have.
   # config.allowed_tlds = nil
 
-  # Reject addresses one keystroke from a well-known provider (gmail.co,
+  # Flag addresses one keystroke from a well-known provider (gmail.co,
   # gmial.com). A TLD check CANNOT catch these — .co, .cm and .om are Colombia,
   # Cameroon and Oman, all real.
   #
-  # Think before switching this on: a suggestion is a guess about intent, and a
-  # wrong guess stops a real person signing up with their real address.
-  # Nondisposable.suggestion_for(email) is always available and blocks nothing,
-  # which is the gentler way to use this — show the hint, let the human decide.
-  # config.reject_lookalike_domains = true
+  # Reviewed typos (data/known_typo_domains.txt) are refused outright. Every
+  # other lookalike is a guess — ge.com is one edit from me.com and is General
+  # Electric — so it is a CONFIRMABLE error: the user ticks "yes, this is my
+  # address" and passes. Wire that checkbox first (see
+  # Nondisposable::ConfirmableEmail in the README), or a real user at a
+  # lookalike domain has no way through. `true` means the same as :confirmable.
+  # config.reject_lookalike_domains = :confirmable
   #
   # How many edits still count as a typo. 1 is safe; 2 starts colliding with
   # genuinely different domains. 0 disables suggestions entirely.

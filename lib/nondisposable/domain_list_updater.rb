@@ -116,10 +116,12 @@ module Nondisposable
     end
     private_class_method :replace_domains
 
-    # Downcases, strips whitespace (including stray \r from CRLF payloads),
-    # drops blank lines, and dedupes.
+    # Nondisposable::Domain's canonical form (strips whitespace including a
+    # stray \r from CRLF payloads, downcases, drops the root dot, punycode),
+    # then drops blank lines and dedupes. The same form every lookup uses, so
+    # a unicode entry is stored as the name `disposable?` will ask for.
     def self.normalize(domains)
-      domains.map { |domain| domain.to_s.strip.downcase }.reject(&:empty?).uniq
+      domains.map { |domain| Nondisposable::Domain.normalize(domain) }.reject(&:empty?).uniq
     end
     private_class_method :normalize
   end

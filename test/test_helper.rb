@@ -93,6 +93,15 @@ class OptionalEmailUser < ApplicationRecord
   validates :email, nondisposable: true, allow_blank: true
 end
 
+# A record whose form can say "yes, this address is right".
+class ConfirmingUser < ApplicationRecord
+  self.table_name = "users"
+  include Nondisposable::ConfirmableEmail
+  confirmable_email :email
+
+  validates :email, nondisposable: true
+end
+
 ActiveRecord::Schema.define(version: 2) do
   create_table :users do |t|
     t.string :email
