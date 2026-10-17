@@ -2,52 +2,8 @@
 
 require "test_helper"
 
-# Canonicalization and the public-suffix guard: the two things every list and
-# every check must agree on before any precedence rule means anything.
-class NondisposableDomainTest < NondisposableTestCase
-  D = Nondisposable::Domain
-
-  def test_downcases_strips_and_drops_the_trailing_dot
-    assert_equal "tempmail.com", D.normalize("  TempMail.COM. \r\n")
-  end
-
-  def test_blank_input_is_an_empty_string
-    assert_equal "", D.normalize(nil)
-    assert_equal "", D.normalize("   ")
-    assert_equal "", D.normalize(".")
-  end
-
-  def test_ascii_input_is_otherwise_untouched
-    assert_equal "xn--bcher-kva.de", D.normalize("xn--bcher-kva.de")
-    assert_equal "a_b-c.example.com", D.normalize("A_B-C.example.com")
-  end
-
-  def test_unicode_and_punycode_forms_are_the_same_domain
-    assert_equal D.normalize("xn--bcher-kva.de"), D.normalize("bücher.de")
-    assert_equal D.normalize("xn--bcher-kva.de"), D.normalize("BÜCHER.de")
-  end
-
-  # RFC 3492 §7.1 sample strings, plus everyday IDNs.
-  def test_punycode_matches_published_vectors
-    assert_equal "xn--mnchen-3ya.de", D.normalize("münchen.de")
-    assert_equal "xn--r8jz45g.xn--zckzah", D.normalize("例え.テスト")
-    assert_equal "xn--egbpdaj6bu4bxfgehfvwxn", D.normalize("ليهمابتكلموشعربي؟")
-    assert_equal "xn--ihqwcrb4cv8a8dqg056pqjye", D.normalize("他们为什么不说中文")
-    assert_equal "xn--maana-pta.com", D.normalize("mañana.com")
-  end
-
-  def test_nfkc_folds_compatibility_characters
-    # Full-width Latin letters are what an IME produces; they are the same
-    # domain as their ASCII forms.
-    assert_equal "gmail.com", D.normalize("ｇｍａｉｌ.com")
-  end
-
-  def test_never_raises_on_odd_input
-    assert_kind_of String, D.normalize("\xFF\xFE.com".dup.force_encoding("BINARY"))
-    assert_kind_of String, D.normalize(12345)
-  end
-end
-
+# The public-suffix guard: no single list entry may block a whole namespace.
+# (Nondisposable::Domain is tested in domain_test.rb, with the lookalike work.)
 class NondisposablePublicSuffixTest < NondisposableTestCase
   PS = Nondisposable::PublicSuffix
 

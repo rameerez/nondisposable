@@ -1,70 +1,113 @@
 # frozen_string_literal: true
 
 module Nondisposable
-  # The ONE place a domain becomes comparable.
+  # One answer to "is this the same domain?", shared by every path that
+  # compares a domain against a list.
   #
-  # Every path that matches a domain against a list — configuration, list
-  # ingestion, `disposable?`, the TLD check and suggestions — must agree on what
-  # "the same domain" means, or a list can say one thing and a check another:
-  # `Tempmail.com.` and `tempmail.com` are the same host, and so are
-  # `bücher.de` and `xn--bcher-kva.de`.
+  # Before this existed each path trimmed its input its own way: the suggestion
+  # layer stripped a trailing dot and the database check did not, so
+  # `user@gmial.com.` and `user@gmial.com` could get different verdicts from the
+  # same gem. Anything that matches a domain against a list — bundled, host
+  # configured or downloaded — should go through #normalize first, so that two
+  # spellings of one host can never be judged differently.
   #
-  # Only ever the domain: the local part of an address (case, `+tags`) is the
-  # mailbox owner's business and is never touched here.
+  # WHAT IT DOES
+  #
+  #   Nondisposable::Domain.normalize("  GMail.COM. ")     # => "gmail.com"
+  #   Nondisposable::Domain.normalize("bücher.de")         # => "xn--bcher-kva.de"
+  #   Nondisposable::Domain.normalize("XN--BCHER-KVA.DE")  # => "xn--bcher-kva.de"
+  #   Nondisposable::Domain.from_email("First+tag@GMail.com") # => "gmail.com"
+  #
+  # Only the DOMAIN is ever touched. The local part is case-sensitive under
+  # RFC 5321 and `+tags` are the user's business; nothing here reads or
+  # rewrites them.
+  #
+  # WHY PUNYCODE, AND WHY NO DEPENDENCY
+  #
+  # A unicode domain and its punycode form are the same host (`bücher.de` ==
+  # `xn--bcher-kva.de`), and lists store the ASCII form, so matching has to
+  # happen in ASCII. The `simpleidn` / `addressable` gems would do it, but the
+  # encoding itself (RFC 3492) is forty lines of arithmetic and this gem ships
+  # with no runtime dependencies beyond Rails. What we deliberately do NOT
+  # implement is the full IDNA2008/UTS #46 validity table (which code points
+  # are disallowed): we map — NFC, lowercase, the ideographic full stops — and
+  # encode, and leave "is this label legal" to the DNS. For matching that is
+  # the right trade: a domain we encode that the registry would have refused
+  # cannot be on anybody's list either.
   module Domain
-    # Punycode parameters, RFC 3492 §5.
+    # The label separators UTS #46 treats as a full stop: ideographic,
+    # fullwidth and halfwidth ideographic. A user on a CJK keyboard types these.
+    DOTS = /[。．｡]/.freeze
+
+    # RFC 3492 §5: the bootstring parameters that make it punycode.
     BASE = 36
     TMIN = 1
     TMAX = 26
     SKEW = 38
     DAMP = 700
     INITIAL_BIAS = 72
-    INITIAL_N = 0x80
-    ACE_PREFIX = 'xn--'
+    INITIAL_N = 128
+    private_constant :BASE, :TMIN, :TMAX, :SKEW, :DAMP, :INITIAL_BIAS, :INITIAL_N
 
     class << self
-      # Stripped, without a trailing dot, case-folded, and in ASCII: each
-      # non-ASCII label is NFKC-normalized, downcased and punycode-encoded.
-      # Returns "" for blank input. Never raises on odd input — a label that
-      # cannot be encoded is returned downcased as-is, which matches nothing.
+      # The canonical, ASCII form of a domain: stripped, lowercased, without a
+      # trailing root dot, unicode labels punycode-encoded. "" for blank input,
+      # never nil, so callers can chain without guarding.
       def normalize(domain)
-        value = domain.to_s.strip.delete_suffix('.')
-        return '' if value.empty?
-        return value.downcase if value.ascii_only?
+        value = unicode(domain)
+        return value if value.ascii_only?
 
-        value.unicode_normalize(:nfkc).downcase.split('.', -1).map { |label| to_ascii(label) }.join('.')
-      rescue StandardError
-        domain.to_s.strip.delete_suffix('.').downcase
+        value.split('.', -1).map { |label| label.ascii_only? ? label : "xn--#{punycode(label)}" }.join('.')
+      rescue ArgumentError, Encoding::CompatibilityError
+        # Bytes that are not valid UTF-8 cannot be a domain anybody typed; keep
+        # a stable, comparable form instead of raising inside a validator.
+        domain.to_s.b.strip.downcase.delete_suffix('.')
+      end
+
+      # The same canonicalisation WITHOUT the punycode step, for code that
+      # compares what a human typed (the suggestion layer: a keyboard slip is a
+      # distance between the characters someone pressed, and punycode letters
+      # have no keyboard meaning — `xn--gmal-zqa` is `gmaíl`).
+      def unicode(domain)
+        value = domain.to_s.strip
+        value = value.unicode_normalize(:nfc) unless value.ascii_only?
+        value.gsub(DOTS, '.').downcase.delete_suffix('.')
+      end
+
+      # The domain half of an address, normalised. Splits on the LAST "@", so a
+      # quoted local part containing one (`"a@b"@example.com`) still yields the
+      # right domain. "" when there is no "@" or nothing after it. An empty
+      # local part (`@tempmail.com`) still has a domain worth judging, so it
+      # is not this method's place to refuse it.
+      def from_email(email)
+        _local, at, domain = email.to_s.rpartition('@')
+        return '' if at.empty?
+
+        normalize(domain)
       end
 
       private
 
-      def to_ascii(label)
-        return label if label.ascii_only?
-
-        ACE_PREFIX + punycode_encode(label)
-      end
-
-      # RFC 3492 §6.3, transcribed.
-      def punycode_encode(input)
-        code_points = input.codepoints
-        output = code_points.select { |cp| cp < 0x80 }.pack('U*')
-        basic_count = output.length
-        handled = basic_count
-        output << '-' if basic_count.positive?
+      # RFC 3492 §6.3, the encoder only: we never need to decode.
+      def punycode(label)
+        input = label.codepoints
+        output = input.select { |c| c < 0x80 }.pack('U*')
+        basic = output.length
+        handled = basic
+        output += '-' if basic.positive?
 
         n = INITIAL_N
         delta = 0
         bias = INITIAL_BIAS
 
-        while handled < code_points.length
-          m = code_points.select { |cp| cp >= n }.min
+        while handled < input.length
+          m = input.select { |c| c >= n }.min
           delta += (m - n) * (handled + 1)
           n = m
 
-          code_points.each do |cp|
-            delta += 1 if cp < n
-            next unless cp == n
+          input.each do |c|
+            delta += 1 if c < n
+            next unless c == n
 
             q = delta
             k = BASE
@@ -77,7 +120,7 @@ module Nondisposable
               k += BASE
             end
             output << digit(q)
-            bias = adapt(delta, handled + 1, handled == basic_count)
+            bias = adapt(delta, handled + 1, handled == basic)
             delta = 0
             handled += 1
           end
@@ -90,19 +133,19 @@ module Nondisposable
       end
 
       def threshold(k, bias)
-        if k <= bias then TMIN
-        elsif k >= bias + TMAX then TMAX
-        else k - bias
-        end
+        return TMIN if k <= bias
+        return TMAX if k >= bias + TMAX
+
+        k - bias
       end
 
       def digit(d)
         (d < 26 ? d + 97 : d + 22).chr
       end
 
-      def adapt(delta, num_points, first_time)
-        delta = first_time ? delta / DAMP : delta / 2
-        delta += delta / num_points
+      def adapt(delta, points, first)
+        delta = first ? delta / DAMP : delta / 2
+        delta += delta / points
         k = 0
         while delta > ((BASE - TMIN) * TMAX) / 2
           delta /= BASE - TMIN
