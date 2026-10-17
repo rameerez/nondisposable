@@ -309,7 +309,10 @@ module Nondisposable
         # primary has an accepted snapshot of its own: replacing it with the
         # bundled snapshot would silently unblock every domain added upstream
         # since the release (0.6.1; reported by a CarHey codex review).
-        table_empty = DisposableDomain.none?
+        # A rollback is the deliberate exception: withdrawing a poisoned list
+        # must succeed even when the default source never had a snapshot of
+        # its own, so there the stand-in is used whatever the table holds.
+        table_empty = DisposableDomain.uncached { DisposableDomain.none? }
 
         configured_sources.each do |source|
           snapshot = SourceSnapshot.last_good(source.name)
@@ -317,7 +320,7 @@ module Nondisposable
             snapshots[source] = snapshot.domain_list
           elsif source.name == withdrawn
             log :warn, "#{source.name} has no good snapshot left after the rollback; building the list without it."
-          elsif source.primary? && source.bundled_path && table_empty
+          elsif source.primary? && source.bundled_path && (table_empty || withdrawn)
             log :warn, "#{source.name} has no good snapshot yet; using the list bundled with the gem in its place."
             snapshots[source] = Source.parse(File.read(source.bundled_path)).domains
           elsif source.primary?
@@ -379,7 +382,9 @@ module Nondisposable
       # ---- Seeding and writing ----------------------------------------------
 
       def seed!
-        return false unless DisposableDomain.none?
+        # Callers hold the publish lock, which already disables the query
+        # cache; asked uncached here as well so no future caller can forget.
+        return false unless DisposableDomain.uncached { DisposableDomain.none? }
 
         log :info, 'Domain table is empty; seeding from the blocklist bundled with the gem...'
         domains = Source.parse(bundled_domains.join("\n")).domains
@@ -473,10 +478,16 @@ module Nondisposable
       # time, and two processes publishing the same snapshots write the same
       # rows. Returns the block's value, or nil when another process held the
       # lock for longer than PUBLISH_LOCK_WAIT (it is publishing the same thing).
+      #
+      # Everything under the lock runs with the query cache OFF: an emptiness
+      # check (`DisposableDomain.none?`) answered from a cache filled before
+      # another process or thread wrote the table would let the bundled list
+      # replace rows it never saw.
       def with_publish_lock(&block)
+        uncached = -> { DisposableDomain.uncached(&block) }
         PROCESS_LOCK.synchronize do
           DisposableDomain.connection_pool.with_connection do |connection|
-            next block.call unless connection.supports_advisory_locks?
+            next uncached.call unless connection.supports_advisory_locks?
 
             acquired = false
             deadline = monotonic + PUBLISH_LOCK_WAIT
@@ -490,7 +501,7 @@ module Nondisposable
             next nil unless acquired
 
             begin
-              block.call
+              uncached.call
             ensure
               connection.release_advisory_lock(PUBLISH_LOCK_ID)
             end

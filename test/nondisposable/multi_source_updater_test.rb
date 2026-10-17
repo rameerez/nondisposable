@@ -188,6 +188,49 @@ class NondisposableMultiSourceUpdaterTest < NondisposableTestCase
     assert Nondisposable::DisposableDomain.exists?(name: "ded1.com")
   end
 
+  # 0.6.1 codex blocker: a rollback must still be able to withdraw a list
+  # published next to the bundled stand-in, once that publish made the table
+  # non-empty.
+  def test_rollback_after_a_bundled_stand_in_publish_withdraws_the_list
+    other = src("other")
+    use_sources(DED, other)
+    stub_source(DED, "", status: 503)
+    stub_source(other, list("victim-employer.com"))
+    refute Updater.update # DED failed; bundled stood in on the empty table
+    assert Nondisposable::DisposableDomain.exists?(name: "victim-employer.com")
+
+    assert Updater.rollback("other")
+
+    refute Nondisposable::DisposableDomain.exists?(name: "victim-employer.com")
+    assert Nondisposable::DisposableDomain.exists?(name: "mailinator.com")
+    assert_equal "rolled_back", Snapshot.where(source: "other").newest_first.first.status
+  end
+
+  # 0.6.1 codex major: the emptiness check must not come from the query
+  # cache. Here the cache answers "empty" (primed before a row was written
+  # behind ActiveRecord's back, so the cache is not cleared), while the table
+  # really holds a row: publishing must treat it as populated.
+  def test_emptiness_check_bypasses_the_query_cache
+    other = src("other")
+    use_sources(DED, other)
+    Snapshot.create!(source: "other", status: "ok", fetched_at: Time.current, domain_count: 1, domains: "other.com")
+
+    Nondisposable::DisposableDomain.cache do
+      assert Nondisposable::DisposableDomain.none? # cached: empty
+      Nondisposable::DisposableDomain.connection.raw_connection.execute(
+        "INSERT INTO nondisposable_disposable_domains (name, created_at, updated_at) " \
+        "VALUES ('recent-burner.com', datetime('now'), datetime('now'))"
+      )
+      assert Nondisposable::DisposableDomain.none?, "precondition: the cache still says empty"
+
+      log = capture_log { refute Updater.publish }
+      assert_includes log, "Not publishing"
+      refute Updater.seed, "seed sees the real row too"
+    end
+
+    assert_equal %w[recent-burner.com], Nondisposable::DisposableDomain.pluck(:name)
+  end
+
   def test_first_run_with_a_never_fetched_primary_seeds_an_empty_table
     a = src("a")
     use_sources(a)
