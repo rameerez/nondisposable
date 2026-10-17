@@ -21,6 +21,7 @@
 # plain browser-ish User-Agent naming this script, no retries. Needs only curl
 # and dig on PATH; no gems.
 require 'csv'
+require 'set'
 require 'open3'
 require 'timeout'
 
@@ -59,23 +60,29 @@ rescue Timeout::Error, StandardError
   ''
 end
 
-# dig prints its own failures (";; connection timed out; no servers could be
-# reached") on stdout under +short; those lines are not records.
+# [status, records]. The status is dig's own (NOERROR, NXDOMAIN, SERVFAIL) or
+# TIMEOUT, so an empty answer from a server that replied can never be confused
+# with a lookup that failed: only "NOERROR and empty" proves a record is absent.
 def dig(type, domain)
-  run('dig', '+short', '+time=4', '+tries=2', type, domain).lines.map(&:strip)
-    .reject { |l| l.empty? || l.start_with?(';') }
+  out = run('dig', '+noall', '+comments', '+answer', '+time=4', '+tries=2', type, domain)
+  status = out[/status: ([A-Z]+)/, 1] || 'TIMEOUT'
+  records = out.lines.map(&:strip).reject { |l| l.empty? || l.start_with?(';') }
+               .select { |l| l.split[3].to_s.casecmp?(type) }.map { |l| l.split[4..].join(' ') }
+  [status, records]
 end
 
 def mx_for(domain)
-  dig('MX', domain).map { |l| l.split.last.to_s.delete_suffix('.') }.map { |h| h.empty? ? '.' : h }.sort.uniq
+  status, records = dig('MX', domain)
+  [status, records.map { |l| l.split.last.to_s.delete_suffix('.') }.map { |h| h.empty? ? '.' : h }.sort.uniq]
 end
 
 def ns_for(domain)
-  dig('NS', domain).map { |l| l.delete_suffix('.') }.sort.uniq
+  dig('NS', domain).last.map { |l| l.delete_suffix('.') }.sort.uniq
 end
 
-def resolves?(domain)
-  !dig('A', domain).empty?
+# "MX:NOERROR A:NOERROR AAAA:NOERROR" plus which address records exist.
+def addresses_for(domain)
+  %w[A AAAA].map { |type| [type, *dig(type, domain)] }
 end
 
 def http_for(domain)
@@ -105,12 +112,16 @@ workers = Array.new(CONCURRENCY) do
       rank, domain, suggestion = queue.pop(true)
       # A domain with no valid TLD has nothing to fetch: it cannot be registered.
       if domain.count('.').zero? || %w[con ed].include?(domain.split('.').last)
-        results << [rank, domain, suggestion, '', '', '', '', '', '', '']
+        results << [rank, domain, suggestion, '', '', '', '', '', '', '', '']
         next
       end
 
       http = http_for(domain)
-      results << [rank, domain, suggestion, resolves?(domain) ? 'yes' : 'no', mx_for(domain).join(' '), ns_for(domain).join(' '),
+      mx_status, mx = mx_for(domain)
+      addresses = addresses_for(domain)
+      dns = ["MX:#{mx_status}", *addresses.map { |type, status, _| "#{type}:#{status}" }].join(' ')
+      resolves = addresses.any? { |_, _, records| records.any? } ? 'yes' : 'no'
+      results << [rank, domain, suggestion, dns, resolves, mx.join(' '), ns_for(domain).join(' '),
                   http[:code], http[:final], http[:title], http[:parked].join('|')]
     rescue ThreadError
       break
@@ -123,7 +134,7 @@ workers.each(&:join)
 progress.kill
 
 CSV.open(OUTPUT, 'w') do |csv|
-  csv << %w[rank domain suggestion resolves mx ns http_code final_url title parking_markers]
+  csv << %w[rank domain suggestion dns_status resolves mx ns http_code final_url title parking_markers]
   out = []
   out << results.pop until results.empty?
   out.sort_by { |r| [r[0] == 'extra' ? 1 : 0, r[0].to_i, r[1]] }.each { |r| csv << r }

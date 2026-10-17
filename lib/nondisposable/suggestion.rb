@@ -46,8 +46,8 @@ module Nondisposable
   #      and `aver.com` are what that spells.
   #
   # Measured on the 70% tuning split of test/fixtures/lookalike_corpus.csv
-  # (precision over typo+real rows): distance alone 0.08, filter 1 alone 0.30,
-  # both 0.58, at 78% recall of reviewed typos. The corpus is the Tranco top 1M,
+  # (precision over typo+real rows): distance alone 0.07, filter 1 alone 0.27,
+  # both 0.55, at 79% recall of reviewed typos. The corpus is the Tranco top 1M,
   # so it is crowded with real popular domains — a signup form sees far more
   # typos per lookalike than this does. The untouched 30% holdout is measured
   # by test/nondisposable/lookalike_corpus_test.rb.

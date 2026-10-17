@@ -41,6 +41,14 @@ class NondisposableDomainTest < NondisposableTestCase
     assert_equal "example.com", normalize("example．com")
   end
 
+  def test_compatibility_forms_and_invisible_characters_are_folded
+    # UTS #46 maps these before lookup, and so must we: otherwise a listed
+    # domain is dodged by typing it fullwidth or with a soft hyphen inside.
+    assert_equal "mailinator.com", normalize("ｍａｉｌｉｎａｔｏｒ.com")
+    assert_equal "mailinator.com", normalize("maili­nator.com")
+    assert_equal "mailinator.com", normalize("mail​inator.com")
+  end
+
   def test_blank_and_unreadable_input_is_harmless
     assert_equal "", normalize(nil)
     assert_equal "", normalize("   ")
@@ -83,6 +91,38 @@ class NondisposableDomainTest < NondisposableTestCase
 
     assert Nondisposable.disposable?("user@bücher.de")
     refute User.new(email: "user@bücher.de").valid?
+  end
+
+  def test_a_fullwidth_or_soft_hyphenated_disposable_domain_is_still_caught
+    setup_disposable_domain!("mailinator.com")
+
+    refute User.new(email: "x@ｍａｉｌｉｎａｔｏｒ.com").valid?
+    refute User.new(email: "x@maili­nator.com").valid?
+  end
+
+  def test_a_unicode_exclusion_matches_its_punycode_list_entry
+    setup_disposable_domain!("xn--bcher-kva.de")
+    Nondisposable.configure { |c| c.excluded_domains = ["bücher.de"] }
+
+    assert User.new(email: "x@bücher.de").valid?
+  end
+
+  def test_a_unicode_addition_blocks_its_punycode_spelling
+    Nondisposable.configure { |c| c.additional_domains = ["bücher.de"] }
+
+    refute User.new(email: "x@xn--bcher-kva.de").valid?
+  end
+
+  def test_the_tld_path_reads_fullwidth_and_ideographic_dots_as_dots
+    Nondisposable.configure do |c|
+      c.check_tld = true
+      c.blocked_tlds = %w[tk]
+    end
+
+    refute User.new(email: "x@foo.bar．tk").valid?
+    refute User.new(email: "x@foo.bar．con").valid?
+    refute Nondisposable.valid_tld?("x@foo。con")
+    assert User.new(email: "x@empresa。es").valid?
   end
 
   def test_suggestions_see_through_case_and_the_root_dot

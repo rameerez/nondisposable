@@ -212,7 +212,7 @@ One edit is not enough to tell a typo from a real domain, though. Replayed again
 - `one.com` → `ono.com`; `hive.com`, `life.com` → `live.com`; `grail.com`, `pmail.com` → `gmail.com`
 - `web.dev` → `web.de`; `yahoo.com.au` → `yahoo.com.ar`
 
-So since 0.5.0 suggestions are filtered before anyone sees them: a provider name of four characters or fewer (`me`, `ya`, `aol`, `mail`, `live`…) only takes edits after the name (`me.cmo` yes, `ge.com` no), and every edit has to look like a finger — a swap, a dropped letter (not the first), a doubled letter, an extra vowel, a neighbouring key on QWERTY, or the same key with an accent. A letter from across the keyboard (`grail`, `pmail`, `.au` for `.ar`) is a different word, not a slip. On a held-out 30% of the labelled corpus that keeps 15 of 18 real typos and raises precision from 9% to 48%. Better, still a guess — which is why a guess never refuses anyone on its own.
+So since 0.5.0 suggestions are filtered before anyone sees them: a provider name of four characters or fewer (`me`, `ya`, `aol`, `mail`, `live`…) only takes edits after the name (`me.cmo` yes, `ge.com` no), and every edit has to look like a finger — a swap, a dropped letter (not the first), a doubled letter, an extra vowel, a neighbouring key on QWERTY, or the same key with an accent. A letter from across the keyboard (`grail`, `pmail`, `.au` for `.ar`) is a different word, not a slip. On a held-out 30% of the labelled corpus that keeps 13 of 16 reviewed typos and raises precision from 8% to 45%. Better, still a guess — which is why a guess never refuses anyone on its own.
 
 #### `reject_lookalike_domains`: hard for known typos, confirmable for everything else
 
@@ -230,7 +230,7 @@ config.reject_lookalike_domains = :confirmable # `true` means the same thing
 
 A disposable provider is still refused first, and a blocked TLD is still refused after a confirmation. A host's `additional_email_providers` outranks the known-typo list.
 
-The known-typo list is short (47 entries) on purpose. An entry needs direct evidence that nobody has a mailbox there — a redirect to the provider or the provider's own DNS (`yaho.com`, `homail.com`), a parking or for-sale network (`gamail.com`, `hotmial.com`), a typosquat redirect or catch-all (`gmial.com`, `gmali.com`), or a registered domain with neither MX nor A record (`gmal.com`). "No MX" alone is not enough: SMTP falls back to the A record. The evidence for every entry is in `test/fixtures/lookalike_corpus.csv`, and the suite fails if an entry loses it.
+The known-typo list is short (41 entries) on purpose. An entry needs direct evidence that nobody has a mailbox there — a redirect to the provider or the provider's own DNS (`yaho.com`, `homail.com`), a parking or for-sale network (`gamail.com`, `hotmial.com`), a typosquat redirect or catch-all (`gmial.com`, `gmali.com`), or a registered domain with no MX, A or AAAA record (`gmal.com`). "No MX" alone is not enough: SMTP falls back to the A record. The evidence for every entry is in `test/fixtures/lookalike_corpus.csv`, and the suite fails if an entry loses it.
 
 **Confirmable means the user can say "yes, this address is right".** Give the model somewhere to put that answer:
 
@@ -251,7 +251,7 @@ end
 <% end %>
 ```
 
-Permit `:email_lookalike_confirmed` in your strong parameters. It's virtual — never persisted — so it answers for one save; the error also carries the suggestion in `errors.details[:email]` (`suggestion:`). No concern needed if you'd rather wire it yourself: the validator only looks for a method named `<attribute>_lookalike_confirmed` that returns exactly `true`.
+Permit `:email_lookalike_confirmed` in your strong parameters. It's virtual — never persisted, and reset after every save — so it answers for one save; the error also carries the suggestion in `errors.details[:email]` (`suggestion:`). No concern needed if you'd rather wire it yourself: the validator only looks for a method named `<attribute>_lookalike_confirmed` that returns exactly `true`.
 
 > [!WARNING]
 > Without the checkbox, a confirmable error has no way past it — a real `gnail.com` user would be stuck. Wire the confirmation before you switch this on, or keep using `suggestion_for` as a hint only.

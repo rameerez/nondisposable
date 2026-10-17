@@ -222,6 +222,33 @@ class NondisposableLookalikeValidationTest < NondisposableTestCase
     assert User.new(email: "someone@#{typo}").valid?
   end
 
+  def test_a_known_typo_without_a_local_part_is_still_refused
+    enable
+    user = confirmed("@gmial.com")
+
+    refute user.valid?
+    assert_includes user.errors[:email], "looks like a typo. Did you mean gmail.com?"
+  end
+
+  def test_an_ideographic_dot_does_not_turn_a_question_into_a_wall
+    # `gnail。com` is `gnail.com` typed on a CJK keyboard: confirmable, not an
+    # "impossible TLD".
+    enable
+
+    assert confirmed("someone@gnail。com").valid?
+  end
+
+  def test_a_confirmation_answers_for_one_save
+    enable
+    user = confirmed("someone@gnail.com")
+    assert user.save
+
+    user.email = "someone@hotnail.com"
+    refute user.valid?, "a later lookalike must be asked about again"
+  ensure
+    ConfirmingUser.delete_all
+  end
+
   def test_the_known_typo_list_matches_through_case_and_the_root_dot
     enable
     typo = Nondisposable::KnownTypos.all.keys.first

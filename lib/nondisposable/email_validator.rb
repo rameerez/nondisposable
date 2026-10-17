@@ -70,6 +70,11 @@ module ActiveModel
 
           if invalid || config.reject_lookalike_domains
             suggestion = Nondisposable::Suggestion.for(value)
+            # `@gmial.com` has no local part to build "Did you mean ..." from,
+            # but it is still a reviewed typo: name the domain instead.
+            if suggestion.nil? && config.lookalike_distance.to_i.positive?
+              suggestion = Nondisposable::KnownTypos.correction_for(value)
+            end
             if suggestion
               message = config.lookalike_error_message.sub('%{suggestion}', suggestion)
               # Hard: no confirmation can make an impossible TLD deliverable —

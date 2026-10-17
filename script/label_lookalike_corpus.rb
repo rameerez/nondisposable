@@ -47,11 +47,9 @@ TYPO = {
   'hmail.com' => 'Afternic (for sale) nameservers; Null MX (RFC 7505, accepts no mail)',
   'gmmail.com' => 'renewyourname.net (expired-domain parking) nameservers; no MX',
   'gmali.com' => 'no MX; homepage redirects to primequote.com, unrelated insurance ads',
-  'gmil.com' => 'webmasters.com typo portfolio; MX mail.yaxmail.net, the catch-all shared with hotmil.com',
-  'hotmil.com' => 'webmasters.com typo portfolio; MX mail.yaxmail.net, the catch-all shared with gmil.com',
   'gmail.co' => 'Google-served 404 page; no MX (Google defensive registration)',
   'gmail.cm' => 'redirects to accounts.google.com; no MX (Google defensive registration)',
-  'gmal.com' => 'registered (Google Domains NS) with neither MX nor A: mail to it is undeliverable; observed CarHey typo',
+  'gmal.com' => 'registered (Google Domains NS) with no MX, A or AAAA (all NOERROR): mail to it is undeliverable; observed CarHey typo',
   'jmail.com' => '"JMail.com for sale" marketplace lander; no MX; observed CarHey typo',
   'yhoo.it' => 'redirects to yahoo.com; no MX (Yahoo defensive registration)',
   'yaho.com' => 'redirects to yahoo.com; no MX (Yahoo defensive registration)',
@@ -64,7 +62,7 @@ TYPO = {
   'hotamil.com' => 'redirects to outlook.live.com; no MX (Microsoft defensive registration)',
   'otmail.com' => 'redirects to outlook.live.com; no MX (Microsoft defensive registration)',
   'hotmal.com' => 'redirects to outlook.live.com; no MX (Microsoft defensive registration)',
-  'hotmai.com' => 'Azure DNS (Microsoft); its only MX is itself, which has no A record: undeliverable',
+  'hotmai.com' => 'Azure DNS (Microsoft); its only MX is itself, which has no A or AAAA record (NOERROR): undeliverable',
   'hitmail.com' => 'ww80. parking lander; no MX',
   'hotmial.com' => 'ParkingCrew nameservers; no MX',
   'outlok.com' => 'ParkingCrew nameservers; no MX',
@@ -72,21 +70,23 @@ TYPO = {
   'autlook.com' => '"Redirecting..." lander; MX mx156.hostedmxserver.com, the catch-all ol.com shares with pltraffic7.com (parking traffic)',
   'outloo.com' => '"Redirecting..." lander; MX mx156.hostedmxserver.com, the catch-all ol.com shares with pltraffic7.com (parking traffic)',
   'icloude.com' => 'redirects to apple.com; no MX (Apple defensive registration)',
-  'icioud.com' => 'no MX; homepage redirects to gaja79.com, unrelated',
   'zoho.co' => 'redirects to zoho.com; no MX (Zoho defensive registration)',
-  'yndex.ru' => 'no MX; homepage redirects to 21i.ru, unrelated',
   'ayndex.ru' => 'same server (37.46.135.110) and own MX as yandez.ru: a portfolio of Yandex misspellings',
   'yandez.ru' => 'same server (37.46.135.110) and own MX as ayndex.ru: a portfolio of Yandex misspellings',
-  'globoi.com' => 'nameservers ns01.globo.com and MX corp.globo.com: held by Globo itself (defensive registration)',
-  'sbcglobal.et' => '"Future home of sbcglobal.et" placeholder for a misspelling of sbcglobal.net',
-  'rfunbox.com' => 'registered (Route 53 NS) with neither MX nor A: mail to it is undeliverable',
-  'ffrontier.com' => 'registered (Akamai NS) with neither MX nor A: mail to it is undeliverable',
-  'globh.com' => 'registered (Route 53 NS) with neither MX nor A: mail to it is undeliverable'
+  'rfunbox.com' => 'registered (Route 53 NS) with no MX, A or AAAA (all NOERROR): mail to it is undeliverable',
+  'ffrontier.com' => 'registered (Akamai NS) with no MX, A or AAAA (all NOERROR): mail to it is undeliverable',
+  'globh.com' => 'registered (Route 53 NS) with no MX, A or AAAA (all NOERROR): mail to it is undeliverable'
 }.freeze
 
 # Rows the crude rules would label wrongly in either direction. Each one says
 # why it is not what the rules would make it.
 PINNED = {
+  'gmil.com' => ['uncertain', 'shares MX mail.yaxmail.net with hotmil.com, but nothing shows that host is a catch-all rather than ordinary hosting'],
+  'hotmil.com' => ['uncertain', 'shares MX mail.yaxmail.net with gmil.com, but nothing shows that host is a catch-all rather than ordinary hosting'],
+  'icioud.com' => ['uncertain', 'redirects to an unrelated site with no MX; that alone does not show the redirect is monetised or that nobody has mail there'],
+  'yndex.ru' => ['uncertain', 'redirects to an unrelated site with no MX; that alone does not show the redirect is monetised or that nobody has mail there'],
+  'globoi.com' => ['uncertain', 'held by Globo (ns01.globo.com) with Globo corporate MX: provider-owned, but its staff may receive mail there'],
+  'sbcglobal.et' => ['uncertain', '"Future home of" placeholder, but it publishes its own MX: somebody may read that mail'],
   'pate.com' => ['uncertain', 'parked "may be for sale", but a dictionary word (pâté), not a misspelling of nate.com'],
   'sna.com' => ['uncertain', 'parking search page, but a three-letter premium name, not a misspelling of sina.com'],
   'cmail.com' => ['uncertain', '"Domain for sale" and no MX, but c is nowhere near g: a generic name, not shown to be a typo'],
@@ -146,6 +146,15 @@ end
 rows = CSV.read(INPUT, headers: true)
 missing = (TYPO.keys + PINNED.keys) - rows.map { |r| r['domain'] }
 abort "reviewed domains missing from the evidence: #{missing.join(', ')}" if missing.any?
+
+# An "undeliverable" verdict must be backed by this run's DNS, not by memory:
+# every lookup answered NOERROR, and no address record came back.
+rows.each do |row|
+  next unless TYPO.fetch(row['domain'], '').include?('undeliverable')
+  next if row['dns_status'] == 'MX:NOERROR A:NOERROR AAAA:NOERROR' && row['resolves'] == 'no'
+
+  abort "#{row['domain']} is labelled undeliverable but this run saw #{row['dns_status']} resolves=#{row['resolves']}"
+end
 
 CSV.open(OUTPUT, 'w') do |csv|
   csv << %w[domain suggestion label evidence]

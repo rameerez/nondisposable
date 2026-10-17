@@ -21,14 +21,16 @@ module Nondisposable
       def disposable?(domain)
         return false if domain.blank?
 
-        domain = domain.to_s.downcase
+        domain = Nondisposable::Domain.normalize(domain)
         config = Nondisposable.configuration
         candidates = match_candidates(domain)
 
-        additional = config.additional_domains.map { |d| d.to_s.downcase }
+        # Host lists go through the same normalisation as the address, so
+        # `bücher.de` in excluded_domains still matches `xn--bcher-kva.de`.
+        additional = config.additional_domains.map { |d| Nondisposable::Domain.normalize(d) }
         return true if (candidates & additional).any? # rubocop compat: Array#intersect? needs Ruby >= 3.1, gem supports 3.0
 
-        excluded = config.excluded_domains.map { |d| d.to_s.downcase }
+        excluded = config.excluded_domains.map { |d| Nondisposable::Domain.normalize(d) }
         # An exact exclusion always wins, so a specific subdomain can be
         # allowlisted even when a parent domain is on the list.
         return false if excluded.include?(domain)

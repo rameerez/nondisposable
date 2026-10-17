@@ -38,7 +38,7 @@ ail.com,aol.com,uncertain,"no MX, HTTP 200"
 aireel.net,airtel.net,real,site: AIReel: One-Stop AI Video Generator for Limitless Creativity
 airtel.ne,airtel.net,real,"Airtel Niger, a mobile operator"
 ak.ru,bk.ru,uncertain,"no MX, no site"
-al.com,aol.com,real,receives mail at al-com.mail.protection.outlook.com
+al.com,aol.com,real,site: al.com
 alice.io,alice.it,real,"site: Alice | Secure, Safe,   Trustworthy AI"
 alive.com,live.com,real,site: Natural Health   Wellness Magazine | Alive Magazine - Your complete source for n
 all.com,aol.com,real,receives mail at custmx.cscdns.net
@@ -143,7 +143,7 @@ f.ua,i.ua,real,receives mail at alt1.aspmx.l.google.com
 fa.ru,ya.ru,real,site: Финансовый университет при Правительстве Российской Федерации
 fbk.ru,bk.ru,real,"site: ФБК | аудит, консалтинг, налоги, право, оценка, аутсорсинг, ИТ-аудит, кибербезоп"
 ffr.fr,sfr.fr,real,receives mail at ffr-smtp-01.ffr.fr
-ffrontier.com,frontier.com,typo,registered (Akamai NS) with neither MX nor A: mail to it is undeliverable
+ffrontier.com,frontier.com,typo,"registered (Akamai NS) with no MX, A or AAAA (all NOERROR): mail to it is undeliverable"
 fg.com.br,ig.com.br,real,site: Ferramentas Gerais
 fmail.ru,mail.ru,real,receives mail at mail.fmail.ru
 fptonline.net,optonline.net,real,site: FPT Online - Kiến tạo hệ sinh thái truyền thông số hàng đầu - FPT Online
@@ -168,9 +168,9 @@ ghx.com,gmx.com,real,site: AI-Powered Healthcare Supply Chain Orchestration | GH
 gimail.com,gmail.com,typo,"Sedo parking lander, ""o domínio pode estar à venda""; MX localhost"
 gkx.com,gmx.com,uncertain,"no MX, HTTP 301"
 globe.com,globo.com,real,"site: The Boston Globe | New England news, weather and sports"
-globh.com,globo.com,typo,registered (Route 53 NS) with neither MX nor A: mail to it is undeliverable
+globh.com,globo.com,typo,"registered (Route 53 NS) with no MX, A or AAAA (all NOERROR): mail to it is undeliverable"
 globho.com,globo.com,real,site: Software médico y de facturación electrónica | Globho
-globoi.com,globo.com,typo,nameservers ns01.globo.com and MX corp.globo.com: held by Globo itself (defensive registration)
+globoi.com,globo.com,uncertain,"held by Globo (ns01.globo.com) with Globo corporate MX: provider-owned, but its staff may receive mail there"
 globy.com,globo.com,real,receives mail at alt1.aspmx.l.google.com
 gloo.com,globo.com,real,site: The Technology Platform for the Faith Ecosystem | Gloo
 gm.com,gmx.com,real,site: General Motors: Iconic Vehicles for Every Drive
@@ -185,7 +185,7 @@ gmail.om,gmail.com,uncertain,"no MX, no site"
 gmail.ru,mail.ru,uncertain,"no MX, no site; the suggestion (mail.ru) is not even what the user would mean"
 gmailmcom,gmail.com,typo,impossible TLD (no dot at all): no mail can be delivered
 gmaio.com,gmail.com,typo,"MX mail.h-email.net (Bodis parking); ""Loading..."" parking lander"
-gmal.com,gmail.com,typo,registered (Google Domains NS) with neither MX nor A: mail to it is undeliverable; observed CarHey typo
+gmal.com,gmail.com,typo,"registered (Google Domains NS) with no MX, A or AAAA (all NOERROR): mail to it is undeliverable; observed CarHey typo"
 gmali.com,gmail.com,typo,"no MX; homepage redirects to primequote.com, unrelated insurance ads"
 gmall.com,gmail.com,uncertain,"a GitHub Pages site titled GMALL.COM; could be a ""G mall"" brand"
 gmb.net,gmx.net,real,"site: Home - 2026 - GMB North America, Inc."
@@ -194,7 +194,7 @@ gmd.de,gmx.de,real,receives mail at gmdgateway.scai.fraunhofer.de
 gmeil.com,gmail.com,typo,MX mail.h-email.net (Bodis parking); ww1. parking lander
 gmg.com,gmx.com,real,"site: Global Retailer   Distributor in MENA, SEA   Hong-Kong | GMG"
 gmial.com,gmail.com,typo,"no MX; homepage redirects to flyls.com, an unrelated product buying typo traffic"
-gmil.com,gmail.com,typo,"webmasters.com typo portfolio; MX mail.yaxmail.net, the catch-all shared with hotmil.com"
+gmil.com,gmail.com,uncertain,"shares MX mail.yaxmail.net with hotmil.com, but nothing shows that host is a catch-all rather than ordinary hosting"
 gmmail.com,gmail.com,typo,renewyourname.net (expired-domain parking) nameservers; no MX
 gmo.com,gmx.com,real,site: Investment and Asset Management | Americas | GMO
 gmp.de,gmx.de,real,site: gmp Architekten
@@ -242,11 +242,11 @@ homo.nl,home.nl,real,site: Homo.nl | Gratis 18+ sexchat voor Homo.nl
 hormail.com,hotmail.com,uncertain,"no MX, no site"
 hot-mail.com,hotmail.com,uncertain,"no MX, no site"
 hotamil.com,hotmail.com,typo,redirects to outlook.live.com; no MX (Microsoft defensive registration)
-hotmai.com,hotmail.com,typo,"Azure DNS (Microsoft); its only MX is itself, which has no A record: undeliverable"
+hotmai.com,hotmail.com,typo,"Azure DNS (Microsoft); its only MX is itself, which has no A or AAAA record (NOERROR): undeliverable"
 hotmal.com,hotmail.com,typo,redirects to outlook.live.com; no MX (Microsoft defensive registration)
 hotmasil.com,hotmail.com,typo,"no MX; homepage redirects to aboutfinance.org, unrelated ads"
 hotmial.com,hotmail.com,typo,ParkingCrew nameservers; no MX
-hotmil.com,hotmail.com,typo,"webmasters.com typo portfolio; MX mail.yaxmail.net, the catch-all shared with gmil.com"
+hotmil.com,hotmail.com,uncertain,"shares MX mail.yaxmail.net with gmil.com, but nothing shows that host is a catch-all rather than ordinary hosting"
 hotnail.com,hotmail.com,uncertain,ParkingCrew-range IP and an MX of its own; page did not load
 hq.com,qq.com,real,receives mail at hq-com.mail.protection.outlook.com
 hr.com,rr.com,real,receives mail at alt1.aspmx.l.google.com
@@ -254,7 +254,7 @@ hsn.com,msn.com,real,receives mail at hsn-com.mail.protection.outlook.com
 hsy.com,hey.com,uncertain,"no MX, no site"
 huno.com,juno.com,real,site: HUNO | Huno Knows Hotels | Top 10 Best Hotels | Huno.com
 iac.com,mac.com,real,receives mail at mxa-0015af01.gslb.pphosted.com
-icioud.com,icloud.com,typo,"no MX; homepage redirects to gaja79.com, unrelated"
+icioud.com,icloud.com,uncertain,redirects to an unrelated site with no MX; that alone does not show the redirect is monetised or that nobody has mail there
 iclod.com,icloud.com,uncertain,"MX at orcon.net.nz (a New Zealand ISP): somebody's real mail, or a stale record"
 icloude.com,icloud.com,typo,redirects to apple.com; no MX (Apple defensive registration)
 icoud.com,icloud.com,uncertain,"no MX, no site"
@@ -424,7 +424,7 @@ oa.com,ya.com,uncertain,"no MX, HTTP 200"
 of.pl,o2.pl,real,site: OF.PL
 ointernet.ru,internet.ru,uncertain,"no MX, HTTP 200"
 ok.ru,bk.ru,real,site: Социальная сеть Одноклассники. Общение с друзьями в ОК. Ваше место встречи с одн
-ol.com,aol.com,uncertain,"MX mx156.hostedmxserver.com pltraffic7.com, HTTP 200"
+ol.com,aol.com,uncertain,"MX mx156.hostedmxserver.com, HTTP 200"
 olo.com,ono.com,real,site: Olo - Restaurant Technology   Digital Ordering Platform
 omo.com,ono.com,uncertain,"no MX, HTTP 200"
 on-o.com,ono.com,real,site: TopPage - おのたくぺーじ
@@ -454,7 +454,7 @@ oto.com,ono.com,real,receives mail at alt1.aspmx.l.google.com
 outlok.com,outlook.com,typo,ParkingCrew nameservers; no MX
 outloo.com,outlook.com,typo,"""Redirecting..."" lander; MX mx156.hostedmxserver.com, the catch-all ol.com shares with pltraffic7.com (parking traffic)"
 outlook.ed,outlook.es,typo,impossible TLD .ed: no mail can be delivered
-ovo.com,ono.com,real,"site: Energy Supplier, Switch Gas   Electricity Provider | OVO Energy"
+ovo.com,ono.com,real,receives mail at alt1.aspmx.l.google.com
 ox.pl,o2.pl,real,"site: OX.PL - Portal Śląska Cieszyńskiego , Cieszyn, Skoczów, Ustroń, Wisła, Istebna, "
 oxo.com,ono.com,real,receives mail at mxa-006e9a01.gslb.pphosted.com
 p.ua,i.ua,real,site: P.ua - BUY PRINT® | №1 Магазин картриджей | КУПИ и ПЕЧАТАЙ®
@@ -465,18 +465,18 @@ pe.com,me.com,real,site: pe.com
 pec.ir,pec.it,uncertain,"no MX, no site"
 pefc.it,pec.it,real,site: PEFC Italia
 pin.it,tin.it,real,site: Pinterest
-pinbox.ru,inbox.ru,real,site: Pinbox - программа для локального маркетинга и управления репутацией
+pinbox.ru,inbox.ru,real,receives mail at mx.yandex.net
 pk.ru,bk.ru,real,receives mail at mail.pk.ru
 pmail.com,gmail.com,real,"Pegasus Mail / Mercury (mail software since 1990), own MX"
 pr.com,rr.com,real,site: Press Release Distribution - Grow Your Business - PR.com
 ps.me,pm.me,real,site: QR меню ресторану. Онлайн-меню ресторану або кафе за QR-кодом | Poster POS
 q.com,qq.com,real,site: Home - QTS Data Centers
-q1.com,qq.com,real,site: 冰川网络
+q1.com,qq.com,uncertain,"no MX, HTTP 301"
 q2.com,qq.com,real,site: Digital Banking Solutions for Banks and Credit Unions | Q2
 q8.com,qq.com,real,site: Homepage
 q9.com,qq.com,real,receives mail at mx-dor.bell.ca
 qa.com,ya.com,real,"site: QA | Tech Training, Courses   Apprenticeships |"
-qcloud.com,icloud.com,uncertain,"no MX, HTTP 302"
+qcloud.com,icloud.com,real,site: 腾讯云 产业智变·云启未来 - 腾讯
 qdq.com,qq.com,real,site: Tu equipo de marketing digital | Grupo qdq
 qfq.com,qq.com,real,site: Qui fait Quoi - Qui fait Quoi / Lien MULTIMÉDIA
 qg.com,qq.com,real,"site: Quad MX Solutions: Smarter Marketing, Better Results"
@@ -498,10 +498,10 @@ rbk.ru,bk.ru,uncertain,"no MX, no site"
 rbr.com,rr.com,real,site: Radio   Television Business Report | The Voice Of The Broadcasting Industry
 rc.com,rr.com,real,receives mail at us-smtp-inbound-1.mimecast.com
 rd.com,rr.com,real,receives mail at rd-com.mail.protection.outlook.com
-rfunbox.com,runbox.com,typo,registered (Route 53 NS) with neither MX nor A: mail to it is undeliverable
+rfunbox.com,runbox.com,typo,"registered (Route 53 NS) with no MX, A or AAAA (all NOERROR): mail to it is undeliverable"
 rh.com,rr.com,real,receives mail at alt1.aspmx.l.google.com
 rj.com,rr.com,real,site: Royal Jordanian Airlines — Flights from/to Amman-Jordan | Official Site - Royal 
-rk.com,rr.com,real,site: RK.com | The Best Reality Kings Porn Site with Hardcore Real Sex
+rk.com,rr.com,real,receives mail at mxa-002a0701.gslb.pphosted.com
 rm.com,rr.com,real,"site: RM plc | Learning, assessment solutions and IT services for education"
 rmx.de,gmx.de,real,receives mail at mailin2.rmx.de
 rnet.pl,onet.pl,real,site: Charzykowy - Co się dzieje! - miejscowość wypoczynkowa
@@ -519,7 +519,7 @@ ru.com,rr.com,uncertain,"MX ., no site"
 runfox.com,runbox.com,uncertain,"no MX, no site"
 rv.com,rr.com,real,"site: RV Articles, Tips, Lifestyles, Gear and Travel - RV.com"
 sa.com,usa.com,uncertain,"MX ., no site"
-sbcglobal.et,sbcglobal.net,typo,"""Future home of sbcglobal.et"" placeholder for a misspelling of sbcglobal.net"
+sbcglobal.et,sbcglobal.net,uncertain,"""Future home of"" placeholder, but it publishes its own MX: somebody may read that mail"
 se.com,me.com,real,site: Schneider Electric Global | Your Energy Technology Partner
 sena.com,sina.com,real,site: SENA - SENA
 sfg.fr,sfr.fr,real,site: Bienvenue chez SFG - SFG
@@ -538,7 +538,7 @@ sk.ru,bk.ru,uncertain,"no MX, no site"
 skaff.com,skiff.com,real,site: Skaff Carpet One Floor & Home | Flint MI Flooring & Furniture Store
 skf.com,sky.com,real,site: SKF
 ski.com,sky.com,real,receives mail at ski-com.p10.mxthunder.com
-skift.com,skiff.com,real,"site: Skift: Noticias de viajes, aerolíneas y hoteles"
+skift.com,skiff.com,real,"site: Skift: Travel News, Airline News and Hotel News"
 skny.com,sky.com,real,site: Home - Sean Kelly Gallery
 sks.com,sky.com,real,receives mail at ALT1.ASPMX.L.GOOGLE.com
 skynet.ie,skynet.be,real,site: Skynet.ie - UL Computer Society
@@ -555,7 +555,7 @@ sq.com,qq.com,real,site: SIA-Maintenance Page
 suck.com,duck.com,uncertain,"parked or for sale (ns3.afternic.com ns4.afternic.com), not reviewed as a typo"
 sufy.com,sify.com,uncertain,"no MX, no site"
 suno.com,juno.com,real,site: Suno | AI Music Generator
-syfy.com,sify.com,real,"site: SYFY Official Site: Shows, Videos, News   Schedule"
+syfy.com,sify.com,real,receives mail at mx0a-00a17301.pphosted.com
 ta.com,ya.com,real,site: TA Associates | A Leading Global Growth Private Equity Firm
 tac.com,mac.com,real,"site: History of our company, brand and innovation | Schneider Electric"
 tahoo.com,yahoo.com,uncertain,"no MX, no site"
@@ -573,7 +573,7 @@ teliax.com,telia.com,real,site: Intelligent Telecom Solutions for Business Growt
 telit.com,telia.com,real,site: Telit Cinterion | An End-to-End IoT Solutions Enabler
 tella.com,telia.com,real,"site: Tella | All-in-One Screen Recorder for Mac, Windows   Chrome"
 telos.net,telus.net,real,site: Telos | High-Performance Blockchain Infrastructure
-tels.net,telus.net,real,site: Direct Supply TELS | Building Management for Senior Living
+tels.net,telus.net,real,receives mail at tels-net.mail.protection.outlook.com
 telva.com,telia.com,real,site: Telva - Revista de Moda y Belleza
 tera.com.br,terra.com.br,real,receives mail at alt1.aspmx.l.google.com
 terma.com,terra.com,real,receives mail at terma-com.mail.protection.outlook.com
@@ -601,7 +601,7 @@ tula.com,tuta.com,real,receives mail at alt1.aspmx.l.google.com
 tura.com,tuta.com,real,receives mail at tura-com.mail.protection.outlook.com
 tut.com,tuta.com,real,site: Notes from the Universe — Daily Messages from Mike Dooley
 tuto.com,tuta.com,real,"site: Tuto.com : 6000 tutos vidéo en français · IA, Design, Code, Marketing"
-tuya.com,tuta.com,real,receives mail at out-fe-base-eks-a523509d3d37be79.elb.ap-southeast-1.amazonaws.com
+tuya.com,tuta.com,real,site: Tuya Global AIoT Platform | Smart Device IoT Solutions
 tz-online.de,t-online.de,real,site: tz.de | Aktuelle News aus München und zum FC Bayern
 ua.com,usa.com,real,receives mail at ua-com.mail.protection.outlook.com
 uaa.com,usa.com,real,receives mail at alt1.aspmx.l.google.com
@@ -675,9 +675,9 @@ yaho.com,yahoo.com,typo,redirects to yahoo.com; no MX (Yahoo defensive registrat
 yaho.de,yahoo.de,typo,Yahoo-branded 404 page; no MX (Yahoo defensive registration)
 yahoo.com.au,yahoo.com.ar,real,"site: Yahoo! Australia | Mail, Weather, Search, Politics, News, Finance, Sports and Vi"
 yahoo.com.my,yahoo.com.mx,real,receives mail at mx-apac.mail.gm0.yahoodns.net
-yahoo.gr,yahoo.fr,real,receives mail at mx-eu.mail.am0.yahoodns.net
+yahoo.gr,yahoo.fr,real,site: Αναζήτηση Yahoo - Αναζήτηση στο Web
 yahoo.in,yahoo.it,real,receives mail at mx-apac.mail.gm0.yahoodns.net
-yaldex.com,yandex.com,real,site: Yaldex JavaScript Editor
+yaldex.com,yandex.com,real,receives mail at mail.yaldex.com
 yam.com,ya.com,real,site: yam 蕃薯藤
 yandeg.ru,yandex.ru,uncertain,MX mx.yandex.ru (Yandex-hosted mail): could be a defensive registration or a Yandex 360 customer
 yandex.eu,yandex.ru,uncertain,"redirects to yandex.com with no MX: Yandex-held, but nobody has shown it is typed by mistake"
@@ -693,13 +693,13 @@ ye-ah.net,yeah.net,uncertain,"no MX, HTTP 403"
 yhaoo.com,yahoo.com,typo,redirects to yahoo.com; no MX (Yahoo defensive registration)
 yhoo.com,yahoo.com,typo,redirects to yahoo.com; no MX (Yahoo defensive registration)
 yhoo.it,yahoo.it,typo,redirects to yahoo.com; no MX (Yahoo defensive registration)
-yndex.ru,yandex.ru,typo,"no MX; homepage redirects to 21i.ru, unrelated"
+yndex.ru,yandex.ru,uncertain,redirects to an unrelated site with no MX; that alone does not show the redirect is monetised or that nobody has mail there
 ynet.pl,onet.pl,real,"site: YNET - Tw oacute;j dostawca internetu, telewizji i telefonu"
 yoho.com,zoho.com,real,receives mail at mail.yoho.com
 yp.com,ya.com,real,receives mail at yp-com.mail.protection.outlook.com
 yp.ru,ya.ru,real,receives mail at emx.mail.ru
 yr.com,ya.com,real,receives mail at mxa-0059cf01.gslb.pphosted.com
-yy.com,ya.com,real,site: YY-全民娱乐的互动直播平台
+yy.com,ya.com,real,receives mail at mail.yy.com
 za.com,ya.com,uncertain,"MX ., no site"
 zahoo.com,yahoo.com,uncertain,redirects to yahoo.com but publishes its own MX (a.mx.zahoo.com): somebody may read that mail
 zeb.de,web.de,real,receives mail at mail1.zeb.de

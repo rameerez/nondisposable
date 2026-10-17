@@ -17,10 +17,11 @@
 #          above.com…), or publishes a Null MX (RFC 7505: "accepts no mail");
 #        - it is a typosquat: it redirects visitors to an unrelated monetised
 #          page, or its mail goes to a catch-all run for misspelled domains;
-#        - it is registered but has neither an MX nor an A record, so mail to
-#          it cannot be delivered at all (RFC 5321 §5.1 has nothing to fall
-#          back to). Checked with a full dig status, never inferred from a
-#          lookup that timed out.
+#        - it is registered but has no MX, A or AAAA record, so mail to it
+#          cannot be delivered at all (RFC 5321 §5.1 has nothing to fall
+#          back to). Every lookup must have answered NOERROR — recorded in the
+#          evidence's dns_status column, and the labelling script refuses the
+#          verdict otherwise — never inferred from a lookup that timed out.
 #   3. The evidence is recorded, row by row, in test/fixtures/lookalike_corpus.csv
 #      (collected by script/collect_lookalike_evidence.rb on 2026-10-17), and
 #      the suite fails if an entry here loses its `typo` row there.
@@ -37,7 +38,6 @@ ffrontier.com frontier.com
 
 # --- globo.com ---
 globh.com     globo.com
-globoi.com    globo.com
 
 # --- gmail.com ---
 gamail.com    gmail.com
@@ -52,7 +52,6 @@ gmal.com      gmail.com
 gmali.com     gmail.com
 gmeil.com     gmail.com
 gmial.com     gmail.com
-gmil.com      gmail.com
 gmmail.com    gmail.com
 gmuil.com     gmail.com
 hmail.com     gmail.com
@@ -66,11 +65,9 @@ hotmai.com    hotmail.com
 hotmal.com    hotmail.com
 hotmasil.com  hotmail.com
 hotmial.com   hotmail.com
-hotmil.com    hotmail.com
 otmail.com    hotmail.com
 
 # --- icloud.com ---
-icioud.com    icloud.com
 icloude.com   icloud.com
 
 # --- outlook.com ---
@@ -80,9 +77,6 @@ outloo.com    outlook.com
 
 # --- runbox.com ---
 rfunbox.com   runbox.com
-
-# --- sbcglobal.net ---
-sbcglobal.et  sbcglobal.net
 
 # --- yahoo.com ---
 yahho.com     yahoo.com
@@ -100,7 +94,6 @@ yhoo.it       yahoo.it
 # --- yandex.ru ---
 ayndex.ru     yandex.ru
 yandez.ru     yandex.ru
-yndex.ru      yandex.ru
 
 # --- zoho.com ---
 zoho.co       zoho.com

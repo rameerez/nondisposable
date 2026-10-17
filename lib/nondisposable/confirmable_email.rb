@@ -32,8 +32,8 @@ module Nondisposable
   # reviewed typo (Nondisposable::KnownTypos) are still refused, because for
   # those there is no address the user could be right about.
   #
-  # The attribute is virtual — never persisted — so it answers for one save.
-  # The next time the address changes, the question is asked again.
+  # The attribute is virtual — never persisted — and is reset after every
+  # save, so it answers for one save: a later lookalike is asked again.
   #
   # No concern needed if you would rather wire it yourself: the validator
   # looks for a method named `<attribute>_lookalike_confirmed` returning true,
@@ -55,6 +55,13 @@ module Nondisposable
           define_method("#{name}=") { |value| instance_variable_set(ivar, ActiveModel::Type::Boolean.new.cast(value) || false) }
           alias_method "#{name}?", name
         end
+
+        # Cleared after every save, so a record that was confirmed once and
+        # then given a different lookalike address is asked again.
+        return unless respond_to?(:after_save)
+
+        names = attributes.map { |attribute| "#{attribute}#{SUFFIX}" }
+        after_save { names.each { |name| public_send("#{name}=", false) } }
       end
     end
 
