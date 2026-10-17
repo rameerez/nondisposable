@@ -376,8 +376,29 @@ module Nondisposable
           return false
         end
 
-        write_domains(result.kept)
+        write_domains(result.kept | legacy_spellings(domains, result.kept))
         true
+      end
+
+      # The unicode spelling of every kept internationalised domain that
+      # arrived in unicode, stored ALONGSIDE its canonical punycode row.
+      #
+      # Readers since 0.5.0 look up the punycode form (and match either row);
+      # 0.4.0 looked up exactly what the user typed, lowercased. Storing both
+      # keeps a mixed-version deploy, or a rollback to 0.4.0, from silently
+      # unblocking `bücher.de`. Every upstream list already ships IDNs as
+      # `xn--`, so in practice this only adds rows for host `additional_domains`
+      # typed in unicode.
+      def legacy_spellings(domains, kept)
+        raw = domains.to_a + Array(Nondisposable.configuration.additional_domains)
+        raw.each_with_object(Set.new) do |entry, spellings|
+          next if entry.to_s.ascii_only?
+
+          spelling = Domain.unicode(entry)
+          next if spelling.ascii_only? || spelling.encoding == Encoding::BINARY
+
+          spellings << spelling if kept.include?(Domain.normalize(entry))
+        end
       end
 
       # Replaces the stored list with `domains` in one transaction, writing only

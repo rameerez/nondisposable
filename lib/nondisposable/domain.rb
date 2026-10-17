@@ -55,13 +55,24 @@ module Nondisposable
     # different registered domain from the same letters without one.
     IGNORED = /[­͏ᅟᅠ឴឵᠋-᠏​⁠-⁤⁪-⁯ㅤ︀-️﻿ﾠ\u{1BCA0}-\u{1BCA3}\u{1D173}-\u{1D17A}\u{E0100}-\u{E01EF}]/.freeze
 
-    # DNS caps a name at 253 octets (RFC 1035 §2.3.4). Anything longer, once
-    # the invisible characters are gone, cannot be a registered domain, so it
-    # skips NFKC and punycode: both are superlinear on hostile input (combining
-    # marks to reorder, distinct code points to encode) and their answer could
-    # not match a stored row anyway.
+    # DNS caps a name at 253 octets (RFC 1035 §2.3.4) and a label at 63, and
+    # the punycode encoder is quadratic in a label's distinct code points, so
+    # #normalize hands anything longer back unencoded: it cannot be a
+    # registered domain or match a stored row. The cap applies to the
+    # NORMALISED name — `e` + combining acute is two code points that NFKC
+    # composes into one `é`, so a valid 32-letter label can arrive as 64.
     MAX_LENGTH = 253
     MAX_LABEL_LENGTH = 63
+
+    # The bounds on what is fed to NFKC, which is superlinear on hostile input
+    # (a long run of combining marks to reorder). 1,024 code points is four
+    # per allowed character — room for any real decomposition (Hangul jamo
+    # take three) — and matches DisposableDomain::MAX_INPUT_LENGTH. A run of
+    # more than 30 combining marks is not stream-safe text (UAX #15 §13), so
+    # no registered label contains one and it is not worth normalising.
+    MAX_RAW_LENGTH = 1_024
+    UNSTREAMSAFE = /\p{M}{31,}/.freeze
+
 
     # RFC 3492 §5: the bootstring parameters that make it punycode.
     BASE = 36
@@ -101,11 +112,12 @@ module Nondisposable
         value = value.strip
         return value.downcase.delete_suffix('.') if value.ascii_only?
 
-        # Linear passes first, so the length bound below sees what is left once
+        # Linear passes first, so the raw bound below sees what is left once
         # the invisible padding is gone (300 soft hyphens around
-        # mailinator.com must not buy an exemption).
+        # mailinator.com must not buy an exemption). The DNS limits are
+        # enforced by #normalize on the result, after NFKC has composed it.
         value = value.gsub(IGNORED, '').gsub(DOTS, '.')
-        return value.downcase.delete_suffix('.') if oversized?(value)
+        return value.downcase.delete_suffix('.') if value.length > MAX_RAW_LENGTH || value.match?(UNSTREAMSAFE)
 
         # NFKC, not NFC: it also folds compatibility forms, so fullwidth
         # `ｇｍａｉｌ` is `gmail` — the mapping UTS #46 applies before lookup.

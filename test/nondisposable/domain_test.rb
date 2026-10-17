@@ -203,6 +203,8 @@ class NondisposableDomainTest < NondisposableTestCase
 
   def test_a_unicode_entry_from_a_downloaded_list_is_stored_as_lookups_ask_for_it
     # Through the public path: 0.6.0 replaced the private replace_domains.
+    # A downloaded entry is stored canonically only; the unicode twin row is
+    # written for host additions (no upstream list ships unicode IDNs).
     stub_domain_list("bücher.de\n")
     assert Nondisposable::DomainListUpdater.update
 
@@ -241,5 +243,52 @@ class NondisposableDomainTest < NondisposableTestCase
 
     Nondisposable.configure { |c| c.check_tld = true }
     assert User.new(email: "x@bücher.de".b).valid?
+  end
+  # =========================================================================
+  # Round-3 review regressions (docs/reviews/2026-10-17-pr5-triage.md)
+  # =========================================================================
+
+  def test_a_decomposed_spelling_is_composed_before_the_dns_length_cap
+    # 32 × (e + combining acute) is a 64-code-point raw label that NFKC
+    # composes into a valid 32-letter one; the cap must judge the result.
+    composed = "#{"é" * 32}.com"
+    decomposed = "#{"é" * 32}.com"
+    assert_equal normalize(composed), normalize(decomposed)
+
+    setup_disposable_domain!(normalize(composed))
+    refute User.new(email: "x@#{decomposed}").valid?
+    refute User.new(email: "x@#{composed}").valid?
+  end
+
+  def test_a_run_of_combining_marks_no_label_can_contain_is_not_normalised
+    hostile = "a#{"̕" * 500}#{"̀" * 500}.com"
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    5.times { normalize(hostile) }
+
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 0.1
+  end
+
+  def test_a_legacy_unicode_row_respects_a_canonical_parent_exclusion
+    setup_disposable_domain!("bücher.de") # how 0.4.0 stored it
+    Nondisposable.configure { |c| c.excluded_domains = ["xn--bcher-kva.de"] }
+
+    assert User.new(email: "x@sub.bücher.de").valid?
+    assert User.new(email: "x@bücher.de").valid?
+  end
+
+  def test_a_host_added_unicode_domain_is_stored_in_both_spellings
+    # So a 0.4.0 reader — mixed-version deploy or rollback — still matches it.
+    Nondisposable.configure { |c| c.additional_domains = ["Bücher.de"] }
+    stub_domain_list("tempmail.com\n")
+    assert Nondisposable::DomainListUpdater.update
+
+    assert_includes Nondisposable::DisposableDomain.pluck(:name), "xn--bcher-kva.de"
+    assert_includes Nondisposable::DisposableDomain.pluck(:name), "bücher.de"
+    # Exactly the 0.4.0 lookup: the typed domain, lowercased.
+    assert Nondisposable::DisposableDomain.where(name: "x@Bücher.de".split("@").last.downcase).exists?
+
+    # Publishing again is stable: no churn from the extra row.
+    assert Nondisposable::DomainListUpdater.update
+    assert_equal 1, Nondisposable::DisposableDomain.where(name: "bücher.de").count
   end
 end
