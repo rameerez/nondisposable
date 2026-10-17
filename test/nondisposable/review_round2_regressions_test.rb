@@ -237,6 +237,18 @@ class NondisposableReviewRound2Test < NondisposableTestCase
     refute Nondisposable::DisposableDomain.disposable?(at_total_limit)
   end
 
+  # The lead's exact cases, through both entry points.
+  def test_lead_cases_for_over_length_names
+    ["a" * 64 + ".com", "a." * 130 + "com"].each do |name|
+      assert Nondisposable::DisposableDomain.disposable?(name), name[0, 20]
+      assert Nondisposable.disposable?("user@#{name}"), name[0, 20]
+    end
+    ["a" * 63 + ".com", "a." * 125 + "com"].each do |name| # 63-char label; 253 chars
+      refute Nondisposable::DisposableDomain.disposable?(name), name[0, 20]
+      refute Nondisposable.disposable?("user@#{name}"), name[0, 20]
+    end
+  end
+
   # R3-4: a block_privacy_relays flip compares like with like, and a reset
   # recomputes from the payload.
   def test_a_relay_policy_flip_does_not_trip_the_shrink_guard
