@@ -224,15 +224,14 @@ class DisposableDomainModelTest < NondisposableTestCase
   # =========================================================================
 
   def test_additional_domain_in_excluded_list
-    # A domain in additional_domains but also in excluded_domains
+    # A domain in additional_domains but also in excluded_domains.
+    # Until 0.5 additional_domains was checked first and won. Since 0.6.0 the
+    # precedence table puts the host's exclusion on top (Nondisposable::Precedence).
     Nondisposable.configuration.additional_domains = ["overlap.com"]
     Nondisposable.configuration.excluded_domains = ["overlap.com"]
 
-    # Current logic: additional_domains check comes first (returns true)
-    # before excluded_domains check on the DB result
-    # This is a subtle behavior to document
-    result = Nondisposable::DisposableDomain.disposable?("overlap.com")
-    assert result, "additional_domains takes precedence since it's checked first"
+    refute Nondisposable::DisposableDomain.disposable?("overlap.com"),
+           "excluded_domains outranks additional_domains"
   end
 
   def test_domain_in_db_and_excluded_but_not_additional
@@ -355,7 +354,9 @@ class DisposableDomainModelTest < NondisposableTestCase
                  Nondisposable::DisposableDomain.match_candidates("tempmail.com")
     assert_equal ["a.b.c.tempmail.com", "b.c.tempmail.com", "c.tempmail.com", "tempmail.com"],
                  Nondisposable::DisposableDomain.match_candidates("a.b.c.tempmail.com")
-    assert_equal ["localhost"],
+    # A single label is a public suffix (the PSL's implicit `*` rule), so it is
+    # never a candidate: no stored row can block a whole TLD.
+    assert_equal [],
                  Nondisposable::DisposableDomain.match_candidates("localhost")
   end
 

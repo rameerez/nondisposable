@@ -2,11 +2,18 @@
 
 require_relative "nondisposable/version"
 require_relative "nondisposable/engine"
+require_relative "nondisposable/domain"
+require_relative "nondisposable/public_suffix"
+require_relative "nondisposable/precedence"
+require_relative "nondisposable/source"
+require_relative "nondisposable/source_merge"
+require_relative "nondisposable/source_fetcher"
 require_relative "nondisposable/tld"
 require_relative "nondisposable/suggestion"
 require_relative "nondisposable/email_validator"
 require_relative "nondisposable/domain_list_updater"
 require_relative "nondisposable/tld_list_updater"
+require_relative "nondisposable/public_suffix_list_updater"
 
 module Nondisposable
   class Error < StandardError; end
@@ -30,7 +37,7 @@ module Nondisposable
     return false if email.nil? || !email.include?('@')
     domain = email.to_s.split('@').last
     return false if domain.nil? || domain.empty?
-    DisposableDomain.disposable?(domain.downcase)
+    DisposableDomain.disposable?(domain)
   end
 
   # Does this address end in a TLD that actually exists?
@@ -65,6 +72,26 @@ module Nondisposable
     # DisposableDomain::PARENT_MATCH_DEPTH parent labels, never a bare TLD).
     attr_accessor :check_parent_domains
     attr_reader :on_check_failure
+
+    # ---- Blocklist sources (Nondisposable::Source) --------------------------
+
+    # Where the list of disposable domains comes from: an ordered list of
+    # Nondisposable::Source objects (or Hashes of their attributes). The
+    # default is the single list this gem has always used, so upgrading changes
+    # nothing. Nondisposable::Sources::RECOMMENDED adds a second, independent
+    # primary. Needs the nondisposable_source_snapshots table
+    # (`rails g nondisposable:upgrade`); without it only the default is used.
+    attr_accessor :sources
+
+    # How many independent ORIGINS must list a domain before a :corroborating
+    # source's entry is blocked. Copies don't count: see Nondisposable::Source.
+    attr_accessor :corroboration_threshold
+
+    # Privacy relays (Apple Hide My Email, DuckDuckGo, Firefox Relay,
+    # SimpleLogin, addy.io — data/privacy_relays.txt) forward to a real,
+    # long-lived inbox. false (the default) ALLOWS them even when an upstream
+    # list carries them; true REFUSES them even when none does.
+    attr_accessor :block_privacy_relays
 
     # ---- TLD validity (Nondisposable::Tld) ----------------------------------
 
@@ -125,6 +152,10 @@ module Nondisposable
       @excluded_domains = []
       @on_check_failure = :allow
       @check_parent_domains = true
+
+      @sources = Nondisposable::Sources::DEFAULT
+      @corroboration_threshold = 2
+      @block_privacy_relays = false
 
       @check_tld = false
       @additional_tlds = []

@@ -1,3 +1,28 @@
+## [0.6.0] - Unreleased
+
+More than one blocklist, without trusting any of them more than it has earned. Triggered by a real incident: signups from `mail-burn.com`, a live 10-minute inbox the default list did not carry. The measurement behind every default is in `docs/evidence/2026-10-17-multi-source-measurement.md`. With the default configuration you still get the one list you had before.
+
+### Added
+
+- **Multiple blocklist sources** (`config.sources`, default `Nondisposable::Sources::DEFAULT`, which is today's single list). Each `Nondisposable::Source` has a `trust` (`:primary` blocks everything it lists; `:corroborating` needs `config.corroboration_threshold`, default 2, independent origins) and declares its `derived_from` lineage, so a list that copies another never counts as a second vote. Measured sources ship as constants (`DISPOSABLE_EMAIL_DOMAINS`, `FAKEFILTER`, `DISPOSABLE`, `MAILCHECKER`, `GROUNDCAT`, `WESBOS`) with licences and lineage.
+- **`Nondisposable::Sources::RECOMMENDED`**: the default list plus fakefilter, both primary. +3,275 domains on 2026-10-17, none of them a known real provider. It does **not** include disposable/disposable as a primary; see the README for the 84,341 domains, real mail providers among them, that would add.
+- **Source snapshots** (`nondisposable_source_snapshots`): every fetch of every source is recorded (status, time, sha256, count, list), and the stored list is rebuilt from each source's last good snapshot in one transaction, under a database advisory lock on PostgreSQL/MySQL (process lock on SQLite). Seeding takes the same lock.
+- **`rails generate nondisposable:upgrade`**: an additive migration for existing installs. Until it is migrated (or after rolling it back), the updater keeps the single-source behaviour, so deploying before migrating is safe. Fresh installs get the table from `nondisposable:install`.
+- **Update guards**: streamed size cap (`max_bytes`, 8 MB) and wall-clock `deadline` (30 s) per source; no redirects followed; https only; a snapshot is refused when over 1% of its lines are not domains, when it is below `minimum_count`, when it is under half the largest snapshot still retained or over three times the last good one, or when it equals a rolled-back snapshot. Counts are of unique canonical domains. Additions and removals are logged per source. The list is never published empty, nor while a primary source has never succeeded (the seed stays).
+- **`DomainListUpdater.publish`** (rebuild from snapshots without downloading, e.g. after a config change) and **`DomainListUpdater.rollback(source_name)`** (withdraw a source's newest snapshot and republish).
+- **Public Suffix List guard**: a bundled snapshot of publicsuffix.org's list (MPL 2.0, unmodified) and `Nondisposable::PublicSuffix`. Public suffixes (`com.br`, `co.uk`, `it.com`, `ddns.net`) are never stored, never accepted from `additional_domains`, and never used as a parent-match candidate, so one bad upstream line cannot block a whole namespace. Refresh with `rake nondisposable:psl:update`.
+- **`data/never_disposable.txt`**: real providers and ISPs that upstream lists were found to carry, plus paid mailbox providers; unioned at runtime with `data/email_providers.txt`. Each entry protects its subdomains (`bak.rr.com` under `rr.com`). An upstream source listing one is logged as possible poisoning.
+- **Privacy relays as a policy** (`config.block_privacy_relays`, default `false`, list in `data/privacy_relays.txt`): Hide My Email, DuckDuckGo, Firefox Relay, SimpleLogin/Proton Pass and addy.io are allowed even when a source lists them, or refused even when none does.
+- **`Nondisposable::Domain.normalize`**: one canonical form (stripped, downcased, no trailing dot, IDN to punycode) used by the checks and by list ingestion. `Bücher.de.` and `xn--bcher-kva.de` are the same domain.
+
+### Changed
+
+- ⚠️ **Precedence**: one table, applied both when checking and when building the list: `excluded_domains` > `never_disposable` > `additional_domains` > privacy-relay policy > sources. Before, `additional_domains` was checked first, so a domain in both `additional_domains` and `excluded_domains` was **blocked**; it is now **allowed**. `additional_domains` can no longer block a real provider listed in `never_disposable` (ignored with a warning).
+- ⚠️ Two domains the default upstream list carries are **no longer blocked**: `sify.com` (Indian ISP) and `21cn.com` (China Telecom webmail).
+- Entries that cannot be DNS names (labels over 63 characters, names over 253, IP addresses, HTML) are dropped from downloaded lists. The single-source path also refuses a payload with more than 1% such lines instead of storing it.
+- The parent-domain walk skips public suffixes, so a single-label or `co.uk`-style row can never match.
+- The table is updated by writing only the difference (still in one transaction), instead of deleting and reinserting every row.
+
 ## [0.4.0] - 2026-08-25
 
 Catching the other kind of bad address. A disposable address is someone hiding from you; a typo is someone who wanted to reach you and can't. `user@gmail.con` isn't a throwaway — it's a real person whose account nobody will ever be able to reach, because `.con` has never existed. Both new checks are **opt-in**: upgrading this gem will not start rejecting addresses that were fine yesterday.

@@ -129,6 +129,43 @@ module NondisposableTestHelper
       .to_return(status: status, body: body)
   end
 
+  # The multi-source path only runs when this table exists, so tests opt in
+  # explicitly: create it in setup, drop it in teardown. Same shape as
+  # lib/generators/nondisposable/templates/create_nondisposable_source_snapshots.rb.erb.
+  def create_snapshots_table!
+    connection = ActiveRecord::Base.connection
+    return if connection.table_exists?(:nondisposable_source_snapshots)
+
+    connection.create_table :nondisposable_source_snapshots do |t|
+      t.string :source, null: false
+      t.string :url
+      t.string :status, null: false
+      t.datetime :fetched_at, null: false
+      t.string :sha256
+      t.integer :domain_count
+      t.text :domains
+      t.text :error
+      t.timestamps
+    end
+    Nondisposable::SourceSnapshot.reset_column_information
+  end
+
+  def drop_snapshots_table!
+    ActiveRecord::Base.connection.drop_table(:nondisposable_source_snapshots, if_exists: true)
+    Nondisposable::SourceSnapshot.reset_column_information
+  end
+
+  # Captures Rails.logger output for the duration of the block.
+  def capture_log
+    output = StringIO.new
+    old_logger = Rails.logger
+    Rails.logger = Logger.new(output)
+    yield
+    output.string
+  ensure
+    Rails.logger = old_logger
+  end
+
   # Ensures all required database tables exist.
   # This is necessary because generator tests (Rails::Generators::TestCase)
   # can affect the ActiveRecord connection state, causing in-memory SQLite

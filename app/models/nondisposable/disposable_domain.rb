@@ -8,48 +8,46 @@ module Nondisposable
     # check_parent_domains is enabled: user@a.b.c.tempmail.com is checked as
     # a.b.c.tempmail.com, b.c.tempmail.com, c.tempmail.com and tempmail.com.
     #
-    # Trade-off (documented instead of pulling in a full public-suffix-list
-    # dependency): the walk never queries single-label suffixes (bare TLDs like
-    # "com"), but without a PSL it cannot tell that multi-label suffixes like
-    # "co.uk" are public — those candidates are harmless unless a public suffix
-    # is deliberately added to the list. Conversely, a throwaway address nested
-    # more than 3 labels below a listed domain escapes the walk; blocklisted
-    # domains are registrable domains, so 3 levels covers practical abuse.
+    # The walk never queries a public suffix — not a bare TLD like "com", and
+    # since 0.6.0 not a multi-label one like "co.uk" or "github.io" either
+    # (Nondisposable::PublicSuffix), so no single stored row can ever block a
+    # whole namespace of unrelated registrants. Conversely, a throwaway address
+    # nested more than 3 labels below a listed domain escapes the walk;
+    # blocklisted domains are registrable domains, so 3 levels covers practical
+    # abuse.
     PARENT_MATCH_DEPTH = 3
 
     class << self
+      # Whether `domain` is disposable, according to the precedence table in
+      # Nondisposable::Precedence: host exclusions, then the bundled
+      # never-disposable list, then host additions, then the privacy-relay
+      # policy, and only then this table.
       def disposable?(domain)
-        return false if domain.blank?
+        domain = Nondisposable::Domain.normalize(domain)
+        return false if domain.empty?
 
-        domain = domain.to_s.downcase
-        config = Nondisposable.configuration
-        candidates = match_candidates(domain)
+        verdict, candidates = Nondisposable::Precedence.decide(domain, match_candidates(domain))
+        return verdict == :block unless verdict == :lookup
 
-        additional = config.additional_domains.map { |d| d.to_s.downcase }
-        return true if (candidates & additional).any? # rubocop compat: Array#intersect? needs Ruby >= 3.1, gem supports 3.0
-
-        excluded = config.excluded_domains.map { |d| d.to_s.downcase }
-        # An exact exclusion always wins, so a specific subdomain can be
-        # allowlisted even when a parent domain is on the list.
-        return false if excluded.include?(domain)
-
-        where(name: candidates - excluded).exists?
+        candidates.any? && where(name: candidates).exists?
       end
 
-      # The exact domain plus up to PARENT_MATCH_DEPTH parent domains,
-      # never descending below two labels (bare TLDs are never candidates).
+      # The exact domain plus up to PARENT_MATCH_DEPTH parent domains, never a
+      # public suffix (so never a bare TLD either). Expects a normalized domain.
       def match_candidates(domain)
-        return [domain] unless Nondisposable.configuration.check_parent_domains
-
-        labels = domain.split('.')
         candidates = [domain]
-        1.upto(PARENT_MATCH_DEPTH) do |depth|
-          parent = labels.drop(depth)
-          break if parent.size < 2
 
-          candidates << parent.join('.')
+        if Nondisposable.configuration.check_parent_domains
+          labels = domain.split('.')
+          1.upto(PARENT_MATCH_DEPTH) do |depth|
+            parent = labels.drop(depth)
+            break if parent.size < 2
+
+            candidates << parent.join('.')
+          end
         end
-        candidates
+
+        candidates.reject { |candidate| Nondisposable::PublicSuffix.public_suffix?(candidate) }
       end
     end
 
