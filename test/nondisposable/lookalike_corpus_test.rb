@@ -15,9 +15,14 @@ require "digest"
 #      other row may ever be refused outright. The list is not tested for
 #      "accuracy" against the corpus, because it was built from the corpus —
 #      that test would be circular (codex finding 1).
-#   2. THE RANKER (Suggestion.guess, the list left out) is judged on a holdout
-#      it was never tuned on: a deterministic 30% of rows by hash of the
-#      domain, fixed before any filter was written. Floors on both precision
+#   2. THE RANKER (Suggestion.guess, the list left out) is judged on a
+#      deterministic 30% of rows by hash of the domain, which no variant
+#      comparison used. It is a RETROSPECTIVE holdout, not a pre-registered
+#      one: the split was chosen before tuning but first committed together
+#      with the tuned filters (a86aee0), and one early draft's score on it was
+#      seen (docs/reviews/2026-10-17-pr5-triage.md, round 1 #14). Before any
+#      further tuning, freeze a fresh holdout in its own commit first.
+#      Floors on both precision
 #      and recall, because "suggest nothing" would otherwise score perfectly.
 class NondisposableLookalikeCorpusTest < NondisposableTestCase
   CORPUS_PATH = File.expand_path("../fixtures/lookalike_corpus.csv", __dir__)
@@ -85,7 +90,7 @@ class NondisposableLookalikeCorpusTest < NondisposableTestCase
   end
 
   # =========================================================================
-  # 2. The ranker, on the untouched holdout
+  # 2. The ranker, on the retrospective holdout
   # =========================================================================
 
   def test_the_ranker_holds_its_precision_and_recall_on_the_holdout
