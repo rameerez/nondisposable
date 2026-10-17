@@ -84,3 +84,14 @@ aggressive = build.call(S::RECOMMENDED + [variant.call(S::DISPOSABLE, trust: :pr
 aggressive_added = report.call("RECOMMENDED + DISPOSABLE primary", aggressive, recommended)
 puts "  dropped as never-disposable: #{aggressive.dropped_by_reason[:never_disposable]&.size}"
 puts "  e.g. #{(aggressive_added & tranco).to_a.sort.first(40).join(' ')}" unless tranco.empty?
+
+# The Tranco-ranked domains promoting DISPOSABLE would add, with who lists them.
+if (csv_out = ENV["AGGRESSIVE_CSV"]) && !tranco.empty?
+  ranks = File.foreach(tranco_csv).first(100_000).to_h { |line| rank, domain = line.strip.split(","); [domain, rank.to_i] }
+  rows = (aggressive_added & tranco).sort_by { |domain| ranks[domain] }.map do |domain|
+    listed_by = FILES.keys.select { |source| parsed[source].domains.include?(domain) }.map(&:name)
+    [ranks[domain], domain, listed_by.join(" ")].join(",")
+  end
+  File.write(csv_out, (["tranco_rank,domain,listed_by"] + rows).join("\n") + "\n")
+  puts "wrote #{rows.size} rows to #{csv_out}"
+end

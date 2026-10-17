@@ -51,6 +51,6 @@ measured section was built from this table) and the privacy relays.
 ## disposable/disposable as a primary
 
 +84,341 over `RECOMMENDED`, 70 in the Tranco top 100k, 36 dropped as
-never-disposable. Unprotected examples: `cafe24.com`, `24hourfitness.com`,
+never-disposable (all 70: `2026-10-17-disposable-as-primary-tranco-top100k.csv`, regenerate with `AGGRESSIVE_CSV=path`). Unprotected examples: `cafe24.com`, `24hourfitness.com`,
 `foxwoods.com`, `asana.biz`, `namecheap.com`. Not recommended; documented as an
 informed opt-in.

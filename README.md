@@ -287,6 +287,9 @@ config.sources = Nondisposable::Sources::RECOMMENDED
 
 `RECOMMENDED` adds [fakefilter](https://github.com/7c/fakefilter), which watches temp-mail generators directly. On 2026-10-17 it added **3,275 domains** (13,168 in total, against 9,893), and none of them was a known real provider.
 
+> [!NOTE]
+> **More lists do not catch fresh burners.** `mail-burn.com`, the domain that prompted this feature, was live and handing out inboxes on 2026-10-17. Of the measured lists only disposable/disposable carried it, from its own crawl. groundcat had it too, but only because it copies disposable/disposable. That is **one origin**, and corroboration rightly refuses to count copies, so no precision-first combination of public lists blocks it. A fresh burner shows up in one crawler's list first. Until a list exists that publishes *evidence* for each fresh domain, block a domain you have verified yourself with `config.additional_domains`, and send it upstream.
+
 ### Trust and lineage
 
 Every source is a `Nondisposable::Source` with a `trust`:
@@ -310,7 +313,7 @@ The other measured sources ship as constants, so you can opt in knowingly:
 | `WESBOS` | wesbos/burner-email-providers | MIT | corroborating | no declared lineage, but 57% of it is also in mailchecker |
 
 > [!WARNING]
-> **About promoting `DISPOSABLE` to primary.** It is the broadest list, and the only one that carried `mail-burn.com` on 2026-10-17. On top of `RECOMMENDED` it adds 84,341 domains (70 of them in the Tranco top 100k), and among them are real mail domains: China Unicom (`wo.com.cn`), the Japanese ISP ODN (`odn.ad.jp`), UQ mobile (`uqmobile.jp`), the Moscow ISP MTU (`mtu-net.ru`), plus `cafe24.com`, `24hourfitness.com`, `foxwoods.com` and more. The ones we verified are now in `never_disposable.txt`, but the rest of the list is unknown. If you still want it, `Nondisposable::Sources::DISPOSABLE.with(trust: :primary)` does it. For one specific burner domain, `config.additional_domains` is the precise tool.
+> **About promoting `DISPOSABLE` to primary.** It is the broadest list, and the only one that carried `mail-burn.com` on 2026-10-17. On top of `RECOMMENDED` it adds 84,341 domains (70 of them in the Tranco top 100k, listed in `docs/evidence/2026-10-17-disposable-as-primary-tranco-top100k.csv`), and among them are real mail domains: China Unicom (`wo.com.cn`), the Japanese ISP ODN (`odn.ad.jp`), UQ mobile (`uqmobile.jp`), the Moscow ISP MTU (`mtu-net.ru`), plus `cafe24.com`, `24hourfitness.com`, `foxwoods.com` and more. The ones we verified are now in `never_disposable.txt`, but the rest of the list is unknown. If you still want it, `Nondisposable::Sources::DISPOSABLE.with(trust: :primary)` does it. For one specific burner domain, `config.additional_domains` is the precise tool.
 
 Your own source is a Hash or a `Source`:
 
