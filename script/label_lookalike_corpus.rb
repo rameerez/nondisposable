@@ -26,8 +26,6 @@ require 'csv'
 require 'digest'
 require 'set'
 
-INPUT, OUTPUT = ARGV
-abort "usage: #{$PROGRAM_NAME} evidence.csv corpus.csv" unless INPUT && OUTPUT
 
 TLDS = File.readlines(File.expand_path('../data/iana_tlds.txt', __dir__), chomp: true)
            .reject { |l| l.start_with?('#') }.map(&:downcase).to_set
@@ -143,26 +141,50 @@ def label_for(row)
   end
 end
 
-rows = CSV.read(INPUT, headers: true)
-missing = (TYPO.keys + PINNED.keys) - rows.map { |r| r['domain'] }
-abort "reviewed domains missing from the evidence: #{missing.join(', ')}" if missing.any?
-
 # An "undeliverable" verdict must be backed by this run's DNS, not by memory:
-# every lookup answered NOERROR, and no address record came back.
-rows.each do |row|
-  next unless TYPO.fetch(row['domain'], '').include?('undeliverable')
-  next if row['dns_status'] == 'MX:NOERROR A:NOERROR AAAA:NOERROR' && row['resolves'] == 'no'
-
-  abort "#{row['domain']} is labelled undeliverable but this run saw #{row['dns_status']} resolves=#{row['resolves']}"
+# every lookup answered NOERROR, and there is nothing to deliver to — no
+# address record AND no MX. A remote MX needs no apex address at all, so an
+# MX target, however it looks, means the verdict does not hold.
+def undeliverable_evidence?(row)
+  row['dns_status'] == 'MX:NOERROR A:NOERROR AAAA:NOERROR' &&
+    row['resolves'] == 'no' && row['mx'].to_s.strip.empty?
 end
 
-CSV.open(OUTPUT, 'w') do |csv|
-  csv << %w[domain suggestion label evidence]
-  rows.sort_by { |r| r['domain'] }.each do |row|
-    label, evidence = label_for(row)
-    csv << [row['domain'], row['suggestion'], label, evidence]
+# hotmai.com's only MX is itself, and it has no address: also nowhere to
+# deliver, but only when that MX is the domain itself.
+def self_mx_undeliverable?(row)
+  row['dns_status'] == 'MX:NOERROR A:NOERROR AAAA:NOERROR' &&
+    row['resolves'] == 'no' && row['mx'].to_s.split == [row['domain']]
+end
+
+def check_undeliverable!(rows)
+  rows.each do |row|
+    evidence = TYPO.fetch(row['domain'], '')
+    next unless evidence.include?('undeliverable')
+    next if undeliverable_evidence?(row) || (evidence.include?('only MX is itself') && self_mx_undeliverable?(row))
+
+    abort "#{row['domain']} is labelled undeliverable but this run saw #{row['dns_status']} resolves=#{row['resolves']} mx=#{row['mx'].inspect}"
   end
 end
 
-counts = CSV.read(OUTPUT, headers: true).map { |r| r['label'] }.tally
-warn "wrote #{OUTPUT}: #{counts.sort.map { |k, v| "#{k}=#{v}" }.join(' ')}"
+if $PROGRAM_NAME == __FILE__
+  INPUT, OUTPUT = ARGV
+  abort "usage: #{$PROGRAM_NAME} evidence.csv corpus.csv" unless INPUT && OUTPUT
+
+  rows = CSV.read(INPUT, headers: true)
+  missing = (TYPO.keys + PINNED.keys) - rows.map { |r| r['domain'] }
+  abort "reviewed domains missing from the evidence: #{missing.join(', ')}" if missing.any?
+  check_undeliverable!(rows)
+
+
+  CSV.open(OUTPUT, 'w') do |csv|
+    csv << %w[domain suggestion label evidence]
+    rows.sort_by { |r| r['domain'] }.each do |row|
+      label, evidence = label_for(row)
+      csv << [row['domain'], row['suggestion'], label, evidence]
+    end
+  end
+
+  counts = CSV.read(OUTPUT, headers: true).map { |r| r['label'] }.tally
+  warn "wrote #{OUTPUT}: #{counts.sort.map { |k, v| "#{k}=#{v}" }.join(' ')}"
+end
