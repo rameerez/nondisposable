@@ -1,3 +1,23 @@
+## [0.5.0] - Unreleased
+
+Lookalike detection you can actually switch on. Replaying the 0.4.0 rule ("one edit from a provider") against the Tranco top 1M flagged 707 domains, and many are large real organisations whose staff would have been refused at signup: `ge.com`, `ml.com`, `mi.com`, `se.com` → `me.com`; `ea.com`, `aa.com` → `ya.com`; `bol.com`, `aon.com`, `uol.com` → `aol.com`; `one.com` → `ono.com`; `hive.com`, `life.com` → `live.com`; `grail.com`, `pmail.com` → `gmail.com`; `web.dev` → `web.de`; `yahoo.com.au` → `yahoo.com.ar`. Offline, nothing can tell those apart from `gmial.com` with certainty, so a guess no longer refuses anybody on its own.
+
+### Changed
+
+- **Behavior change for `reject_lookalike_domains = true`: it is now softer, never stricter.** Precedence, first match wins: an exact provider is accepted → an impossible TLD with a nameable correction (`gmail.con`, `gmailmcom`) is **refused**, whether or not `check_tld` is on → a reviewed typo from the new bundled `data/known_typo_domains.txt` (47 entries, e.g. `gmial.com`, `hotmial.com`, `yaho.com`) is **refused** → any other lookalike gets the same "Did you mean …?" error, but **confirmable**: it is skipped when the record says the user confirmed the address as typed. Disposable providers are still refused first, blocked TLDs are still refused after a confirmation, and a host's `additional_email_providers` outranks the known-typo list.
+- **`Nondisposable.suggestion_for` suggests less, and better.** Provider names of four characters or fewer (`me`, `ya`, `aol`, `mail`, `live`…) only take edits after the name, and every edit must look like a finger slip on QWERTY (swap, dropped letter other than the first, doubled letter, extra vowel, neighbouring key, accented same key). On a held-out 30% of the labelled corpus: precision 9% → 48%, recall 83% of reviewed typos. Reviewed typos are always corrected, even where the ranker alone would stay silent (`jmail.com`).
+- `lookalike_distance = 0` now switches off the whole lookalike layer, known-typo list included.
+- The confirmable error is added with type `:lookalike_domain` (and `suggestion:` in its details) so a form can tell it apart: `errors.of_kind?(:email, :lookalike_domain)`. The message is unchanged and still names the correction; hard lookalike errors keep their plain-message form.
+- Domains are normalised the same way on every path (`Nondisposable.disposable?`, the validator, suggestions, the provider and known-typo lists): stripped, lowercased, trailing dot removed, unicode labels converted to punycode. `user@tempmail.com.` and `user@bücher.de` (listed as `xn--bcher-kva.de`) are now caught. The local part is never touched.
+
+### Added
+
+- **`config.reject_lookalike_domains = :confirmable`**, the explicit name for the mode above. Strings (`"confirmable"`, `"true"`, `"false"`) are accepted for YAML/ENV config; any other value raises `ArgumentError` at boot instead of silently meaning "on".
+- **`Nondisposable::ConfirmableEmail`**: `include` it and call `confirmable_email :email` to get a virtual, boolean-cast `email_lookalike_confirmed` attribute for a "Yes, my email is right" checkbox. Without the concern, any `<attribute>_lookalike_confirmed` method returning exactly `true` works.
+- **`Nondisposable::KnownTypos`** and `data/known_typo_domains.txt`: the only lookalikes refused outright, each with direct evidence that nobody has a mailbox there (redirect to the provider or the provider's own DNS, parking/for-sale network, typosquat redirect or catch-all, or registered with neither MX nor A record). The evidence is in `test/fixtures/lookalike_corpus.csv` (713 rows: 50 typo, 559 real, 104 uncertain), built by `script/collect_lookalike_evidence.rb` and `script/label_lookalike_corpus.rb`; the suite fails if an entry loses its evidence row or if any non-typo row can be refused.
+- **`Nondisposable::Domain.normalize` / `.from_email`**: the shared canonical form, including a zero-dependency RFC 3492 punycode encoder.
+- `Nondisposable::Suggestion.guess(domain)`: the ranker alone, without the reviewed list.
+
 ## [0.4.0] - 2026-08-25
 
 Catching the other kind of bad address. A disposable address is someone hiding from you; a typo is someone who wanted to reach you and can't. `user@gmail.con` isn't a throwaway — it's a real person whose account nobody will ever be able to reach, because `.con` has never existed. Both new checks are **opt-in**: upgrading this gem will not start rejecting addresses that were fine yesterday.
