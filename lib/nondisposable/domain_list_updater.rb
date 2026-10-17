@@ -303,6 +303,13 @@ module Nondisposable
       def publish!(withdrawn: nil)
         snapshots = {}
         missing_primaries = []
+        # The bundled list may stand in for a never-fetched primary ONLY on an
+        # empty table. A populated table (a host upgrading from 0.4/0.5, whose
+        # rows are newer than this gem's release) is kept as it is until every
+        # primary has an accepted snapshot of its own: replacing it with the
+        # bundled snapshot would silently unblock every domain added upstream
+        # since the release (0.6.1; reported by a CarHey codex review).
+        table_empty = DisposableDomain.none?
 
         configured_sources.each do |source|
           snapshot = SourceSnapshot.last_good(source.name)
@@ -310,7 +317,7 @@ module Nondisposable
             snapshots[source] = snapshot.domain_list
           elsif source.name == withdrawn
             log :warn, "#{source.name} has no good snapshot left after the rollback; building the list without it."
-          elsif source.primary? && source.bundled_path
+          elsif source.primary? && source.bundled_path && table_empty
             log :warn, "#{source.name} has no good snapshot yet; using the list bundled with the gem in its place."
             snapshots[source] = Source.parse(File.read(source.bundled_path)).domains
           elsif source.primary?
@@ -322,7 +329,8 @@ module Nondisposable
 
         if missing_primaries.any?
           log :error, "Not publishing: primary source(s) #{missing_primaries.join(', ')} have never been fetched successfully. " \
-                      'Keeping the current list (seeding it from the bundled snapshot if it is empty).'
+                      'Keeping the current list unchanged (seeding it from the bundled snapshot only if it is empty) ' \
+                      'until every primary has an accepted snapshot of its own.'
           seed!
           return false
         end

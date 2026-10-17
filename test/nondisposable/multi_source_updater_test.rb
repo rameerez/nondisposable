@@ -150,7 +150,8 @@ class NondisposableMultiSourceUpdaterTest < NondisposableTestCase
     assert_includes failed.error, "500"
   end
 
-  def test_first_run_with_a_failing_bundled_primary_stands_in_the_bundled_list
+  def test_first_run_on_an_empty_table_stands_in_the_bundled_list_for_a_failing_primary
+    assert Nondisposable::DisposableDomain.none?, "a fresh install"
     use_sources(DED, src("other"))
     stub_source(DED, "", status: 503)
     stub_source(src("other"), list("other.com"))
@@ -160,6 +161,31 @@ class NondisposableMultiSourceUpdaterTest < NondisposableTestCase
     assert_includes log, "using the list bundled with the gem in its place"
     assert Nondisposable::DisposableDomain.exists?(name: "mailinator.com"), "the seed's domains are all still there"
     assert Nondisposable::DisposableDomain.exists?(name: "other.com")
+  end
+
+  # 0.6.1 regression (CarHey #504 codex review): a host upgrading from 0.4/0.5
+  # has a populated table and no snapshots. If the default source fails on the
+  # first update while another primary succeeds, the bundled list must NOT
+  # replace the table: its rows are newer than the gem release.
+  def test_first_run_on_a_populated_table_never_replaces_it_with_the_bundled_list
+    setup_disposable_domain!("recent-burner.com") # fetched upstream after the gem release
+    fakefilter = src("fakefilter")
+    use_sources(DED, fakefilter)
+    stub_source(DED, "", status: 503)
+    stub_source(fakefilter, list(many(1_000, prefix: "ff")))
+
+    log = capture_log { refute Updater.update }
+
+    assert_includes log, "Not publishing: primary source(s) disposable-email-domains have never been fetched successfully"
+    refute_includes log, "using the list bundled with the gem in its place"
+    assert Nondisposable::DisposableDomain.disposable?("recent-burner.com"), "still blocked"
+    assert_equal %w[recent-burner.com], Nondisposable::DisposableDomain.pluck(:name), "table untouched"
+
+    # Once the default source succeeds, everything is published normally.
+    stub_source(DED, list(many(5_000, prefix: "ded")))
+    assert Updater.update
+    assert Nondisposable::DisposableDomain.exists?(name: "ff1.com")
+    assert Nondisposable::DisposableDomain.exists?(name: "ded1.com")
   end
 
   def test_first_run_with_a_never_fetched_primary_seeds_an_empty_table

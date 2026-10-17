@@ -1,3 +1,9 @@
+## [0.6.1] - 2026-10-17
+
+### Fixed
+
+- **A populated table is never replaced with the bundled list.** In 0.6.0, when a PRIMARY source with a bundled list (the default `disposable-email-domains`) had never been fetched successfully, `DomainListUpdater` put the list bundled with the gem in its place and published it, even over a populated table. **Who is affected:** hosts on a multi-source configuration (e.g. `Sources::RECOMMENDED`) that upgraded from 0.4/0.5. Their table is populated but has no snapshots yet. If the default source failed on the first update while another primary succeeded, the table was replaced by the bundled snapshot plus that primary, and every domain added upstream since the gem's release stopped being blocked until the next successful run. `update` returned false, but the list had already shrunk. Now the bundled stand-in is used **only on an empty table** (a fresh install). With a populated table, publishing is skipped with an error log and the table is kept as it is, until every primary has an accepted snapshot of its own. Rollback keeps its explicit bundled fallback. Reported by a codex review in CarHey.
+
 ## [0.6.0] - 2026-10-17
 
 Ships everything listed under 0.5.0 too: 0.5.0 was never released on its own.
