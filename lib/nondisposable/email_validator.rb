@@ -105,7 +105,7 @@ module ActiveModel
           # See "why a hard correction outranks the throwaway check" above. A
           # plain message, not the confirmable :lookalike_domain kind, so a
           # form never offers "yes, this is right" for it.
-          return reject(record, attribute, config.lookalike_message(spelling.correction)) if spelling&.correction
+          return add_lookalike_error(record, attribute, config, spelling.correction, confirmable: false) if spelling&.correction
 
           # 2. A throwaway provider.
           if Nondisposable::DisposableDomain.disposable?(domain)
@@ -120,10 +120,7 @@ module ActiveModel
           if config.reject_lookalike_domains && !spelling.impossible
             suggestion = Nondisposable::Suggestion.for(value)
             if suggestion && !Nondisposable::ConfirmableEmail.confirmed?(record, attribute)
-              # Typed, so a form can tell this error apart and offer the
-              # "yes, this is right" checkbox: errors.of_kind?(:email, :lookalike_domain).
-              record.errors.add(attribute, :lookalike_domain, message: config.lookalike_message(suggestion), suggestion: suggestion)
-              return
+              return add_lookalike_error(record, attribute, config, suggestion, confirmable: true)
             end
           end
 
@@ -201,6 +198,51 @@ module ActiveModel
           # never pays for a distance walk.
           Nondisposable::Suggestion.for(value) || Nondisposable::KnownTypos.correction_for(value)
         end
+      end
+
+      # The "Did you mean …?" error, hard or confirmable.
+      #
+      # The confirmable one is always typed :lookalike_domain (with the
+      # suggestion in its details), so a form can tell it apart and offer the
+      # "yes, this is right" checkbox: errors.of_kind?(:email, :lookalike_domain).
+      # The hard one is a plain message, exactly as before 0.5.0 — or, for a
+      # Symbol, an error of that name, just as error_message and the TLD
+      # messages are added.
+      #
+      # A Symbol goes through errors.add, so it resolves through the same
+      # ActiveModel chain as every other Rails error name. It is tried once
+      # here first, though: a translation that is missing, names a variable we
+      # don't pass, or is a whole group (a Hash) is a refusal with a broken
+      # message, and we refuse with the default message instead — never a
+      # raise, which on_check_failure = :allow would turn into an acceptance.
+      def add_lookalike_error(record, attribute, config, suggestion, confirmable:)
+        key = config.lookalike_error_message
+        message =
+          if !key.is_a?(Symbol) then config.lookalike_message(suggestion)
+          elsif translatable?(record, attribute, config, key, suggestion) then key
+          else config.default_lookalike_message(suggestion)
+          end
+
+        if confirmable
+          record.errors.add(attribute, :lookalike_domain, message: message, suggestion: suggestion)
+        elsif message.is_a?(Symbol)
+          record.errors.add(attribute, message, suggestion: suggestion)
+        else
+          record.errors.add(attribute, message)
+        end
+        nil
+      end
+
+      # Would this Rails error name resolve to a String for this record, in
+      # the current locale (and its I18n fallbacks, when the host has them on)?
+      def translatable?(record, attribute, config, key, suggestion)
+        text = record.errors.generate_message(attribute, key, suggestion: suggestion, raise: true)
+        raise TypeError, "it resolved to #{text.class}, not a String" unless text.is_a?(String)
+
+        true
+      rescue StandardError => e
+        config.default_lookalike_message(suggestion, e) # logs it
+        false
       end
 
       def reject(record, attribute, message)

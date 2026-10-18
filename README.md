@@ -135,7 +135,7 @@ Nondisposable.configure do |config|
 
   config.invalid_tld_error_message = "doesn't look like a real email address"
   config.blocked_tld_error_message = "domain ending is not allowed"
-  config.lookalike_error_message = "looks like a typo. Did you mean %{suggestion}?" # or an I18n key, or a lambda
+  config.lookalike_error_message = "looks like a typo. Did you mean %{suggestion}?" # or a Rails error name (:email_lookalike), or a lambda
 end
 ```
 
@@ -254,7 +254,7 @@ config.reject_lookalike_domains = :confirmable # `true` means the same thing
 
 A disposable provider is refused before any **guess** (a confirmable "did you mean" would only let the user confirm an address that is then refused anyway), and a blocked TLD is still refused after a confirmation. A host's `additional_email_providers` outranks the known-typo list.
 
-The two **hard** corrections — an impossible TLD and a reviewed typo — are answered before the disposable check, without a database query (since 0.6.2). Upstream blocklists carry some reviewed typos (the bundled snapshot lists `gmial.com`, `hotmai.com` and `hotmial.com`), and the address is refused either way; but `ana@gmial.com` is a person who missed a key, not someone hiding behind a temporary inbox, so they get "Did you mean ana@gmail.com?" rather than the disposable message. Before 0.6.2 these typos got the disposable message whenever the table was loaded.
+The two **hard** corrections — an impossible TLD and a reviewed typo — are answered before the disposable check, without a database query (since 0.6.2). Upstream blocklists carry some reviewed typos (the bundled snapshot lists `gmial.com`, `hotmai.com` and `hotmial.com`), and the address is refused either way; but `ana@gmial.com` is a person who missed a key, not someone hiding behind a temporary inbox, so they get "Did you mean ana@gmail.com?" rather than the disposable message — also over a validator's own `message:`, and when the domain is in your `additional_domains`. Before 0.6.2 these typos got the disposable message whenever the table was loaded.
 
 The known-typo list is short (41 entries) on purpose. An entry needs direct evidence that nobody has a mailbox there — a redirect to the provider or the provider's own DNS (`yaho.com`, `homail.com`), a parking or for-sale network (`gamail.com`, `hotmial.com`), a typosquat redirect or catch-all (`gmial.com`, `gmali.com`), or a registered domain with no MX, A or AAAA record (`gmal.com`). "No MX" alone is not enough: SMTP falls back to the A record. The evidence for every entry is in `test/fixtures/lookalike_corpus.csv`, and the suite fails if an entry loses it.
 
@@ -304,11 +304,11 @@ At most one error is added, however many checks fire — and whenever the gem ca
 
 #### Translating the "Did you mean" message
 
-`lookalike_error_message` takes a String (with `%{suggestion}`), an I18n key, or anything callable. A Symbol is looked up with `I18n.t` when the address is validated, so it answers in the current request's locale, with `suggestion:` to interpolate:
+`lookalike_error_message` takes a String (with `%{suggestion}`), a Rails error name, or anything callable. A Symbol means what it means for `error_message` and the TLD messages: a short error name, looked up when the address is validated through the usual ActiveModel chain (`activerecord.errors.models.user.attributes.email.<name>`, …, `errors.messages.<name>`), so it answers in the current request's locale and can differ per model or attribute:
 
 ```ruby
 # config/initializers/nondisposable.rb
-config.lookalike_error_message = :"errors.messages.email_typo"
+config.lookalike_error_message = :email_lookalike
 ```
 
 ```yaml
@@ -316,10 +316,12 @@ config.lookalike_error_message = :"errors.messages.email_typo"
 es:
   errors:
     messages:
-      email_typo: "parece una errata. ¿Querías decir %{suggestion}?"
+      email_lookalike: "parece una errata. ¿Querías decir %{suggestion}?"
 ```
 
-`%{suggestion}` is the full corrected address (`ana@gmail.com`), or just the corrected domain when nothing was typed before the `@`. A key with no translation in the current locale falls back to the default English message, never to "Translation missing"; so does a translation or callable that raises (logged), because the address is refused either way and a broken locale file must never let it through. For anything else, pass a callable: `config.lookalike_error_message = ->(suggestion) { I18n.t("errors.email_typo", suggestion: suggestion) }`. A String works exactly as before.
+`%{suggestion}` is the full corrected address (`ana@gmail.com`), or just the corrected domain when nothing was typed before the `@`; `%{attribute}` and `%{value}` work as in any Rails error message. The hard error is added under that name (`errors.of_kind?(:email, :email_lookalike)`), like `error_message`; the confirmable one stays `:lookalike_domain`, so your checkbox logic doesn't change. That is also why `:lookalike_domain` itself is refused as the name.
+
+If the key has no translation in the current locale, Rails' lookup (and I18n's locale fallbacks, if you've turned them on) gets the first try; only when nothing is found does the gem use its default English message, never "Translation missing". The same goes for a translation that names a variable the gem doesn't pass, a key that names a whole group, or a callable that raises: the message falls back and the error is logged, and the address is refused either way, so a broken locale file can never let it through. For anything else, pass a callable that returns a String: `config.lookalike_error_message = ->(suggestion) { I18n.t("my_app.email_typo", suggestion: suggestion) }`. A String works exactly as before.
 
 ### Direct Check
 

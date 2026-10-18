@@ -259,25 +259,49 @@ class NondisposableLookalikeValidationTest < NondisposableTestCase
   # =========================================================================
   # A reviewed typo the blocklist also lists (0.6.2)
   #
-  # Upstream lists carry some of our reviewed typos (the bundled snapshot has
-  # gmial.com, hotmai.com and hotmial.com). Both verdicts refuse the address;
-  # these tests pin which MESSAGE wins: the correction, because it is the one
-  # that is true about the person typing.
+  # Upstream lists carry some of our reviewed typos (the bundled snapshot of
+  # 2026-10-17 has gmial.com, hotmai.com and hotmial.com). Both verdicts
+  # refuse the address; these tests pin which MESSAGE wins: the correction,
+  # because it is the one that is true about the person typing.
   # =========================================================================
 
-  def test_a_known_typo_in_the_bundled_blocklist_gets_its_correction_once_the_table_is_loaded
-    assert Nondisposable::DomainListUpdater.seed
+  # Shaped like that snapshot, but ours: a routine refresh of the bundled
+  # list must not turn these tests red. Three reviewed typos, two listed
+  # throwaways the ranker reads as one finger from a provider, and a plain
+  # throwaway.
+  UPSTREAM_SHAPED_LIST = %w[gmial.com hotmai.com hotmial.com gotmail.com tmail.com tempmail.com].freeze
+  LISTED_TYPOS_IN_SNAPSHOT = { "gmial.com" => "gmail.com", "hotmai.com" => "hotmail.com", "hotmial.com" => "hotmail.com" }.freeze
+
+  # Through the real import path, so this also proves the loader keeps the
+  # reviewed typos in the table (dropping them would let them through for
+  # every host without the lookalike layer).
+  def load_upstream_shaped_list!
+    stub_domain_list(UPSTREAM_SHAPED_LIST.join("\n") + "\n")
+    assert Nondisposable::DomainListUpdater.update
+    UPSTREAM_SHAPED_LIST.each { |domain| assert Nondisposable.disposable?("ana@#{domain}"), "#{domain} should be in the table" }
+  end
+
+  def test_a_known_typo_a_blocklist_lists_gets_its_correction_once_the_table_is_loaded
+    load_upstream_shaped_list!
     enable
 
-    { "gmial.com" => "gmail.com", "hotmai.com" => "hotmail.com", "hotmial.com" => "hotmail.com" }.each do |typo, correction|
-      # Not vacuous: the table really does list it.
-      assert Nondisposable.disposable?("ana@#{typo}"), "#{typo} is expected in the bundled blocklist"
-
+    LISTED_TYPOS_IN_SNAPSHOT.each do |typo, correction|
       user = confirmed("ana@#{typo}")
       refute user.valid?
       assert_equal ["looks like a typo. Did you mean ana@#{correction}?"], user.errors[:email]
       refute user.errors.of_kind?(:email, :lookalike_domain), "a reviewed typo is hard, listed or not"
     end
+  end
+
+  def test_the_bundled_snapshot_still_carries_the_overlap_this_release_was_about
+    # A soft check, never a failure: it is upstream's data, and a refresh may
+    # drop these. If it does, the tests above (on our own list) still hold;
+    # this only says the motivating case is gone from the bundled file.
+    bundled = File.readlines(Nondisposable::DomainListUpdater::BUNDLED_LIST_PATH, chomp: true).map { |line| line.strip.downcase }
+    missing = LISTED_TYPOS_IN_SNAPSHOT.keys - bundled
+    skip "the bundled blocklist no longer lists #{missing.join(', ')}" if missing.any?
+
+    LISTED_TYPOS_IN_SNAPSHOT.each_key { |typo| assert Nondisposable::KnownTypos.include?(typo) }
   end
 
   def test_every_known_typo_gets_its_correction_even_if_a_blocklist_lists_it
@@ -316,6 +340,16 @@ class NondisposableLookalikeValidationTest < NondisposableTestCase
     assert_equal ["is a throwaway address"], throwaway.errors[:email]
   end
 
+  def test_the_correction_also_outranks_the_hosts_own_additional_domains
+    # Still refused; the host listed it as a throwaway, but the person typing
+    # it meant gmail.com, and the correction is the message that helps them.
+    enable(:confirmable, additional_domains: %w[gmial.com])
+
+    user = User.new(email: "ana@gmial.com")
+    refute user.valid?
+    assert_equal ["looks like a typo. Did you mean ana@gmail.com?"], user.errors[:email]
+  end
+
   def test_a_listed_impossible_tld_with_a_correction_gets_the_correction
     # The other HARD correction. With check_tld alone, as with the lookalike
     # layer on: no mail reaches `.con`, so a blocklist entry adds nothing.
@@ -328,10 +362,10 @@ class NondisposableLookalikeValidationTest < NondisposableTestCase
   end
 
   def test_a_guess_the_blocklist_lists_is_still_refused_as_a_throwaway
-    # `gotmail.com` is one finger from hotmail.com AND a listed throwaway in
-    # the bundled snapshot. A guess is confirmable; asking "did you mean
-    # hotmail.com?" would let the user tick "yes" only to be refused anyway.
-    assert Nondisposable::DomainListUpdater.seed
+    # `gotmail.com` is one finger from hotmail.com AND a listed throwaway (it
+    # is in the bundled snapshot too). A guess is confirmable; asking "did you
+    # mean hotmail.com?" would let the user tick "yes" only to be refused anyway.
+    load_upstream_shaped_list!
     enable
     assert_equal "ana@hotmail.com", Nondisposable.suggestion_for("ana@gotmail.com")
     refute Nondisposable::KnownTypos.include?("gotmail.com")
@@ -411,30 +445,64 @@ class NondisposableLookalikeValidationTest < NondisposableTestCase
   end
 
   # =========================================================================
-  # lookalike_error_message: String, I18n key or callable (0.6.2)
+  # lookalike_error_message: String, Rails error name or callable (0.6.2)
   # =========================================================================
 
-  def test_a_symbol_is_an_i18n_key_interpolated_with_the_suggestion
-    I18n.backend.store_translations(:en, nondisposable_test: { typo: "is misspelt. Try %{suggestion}" })
-    enable(:confirmable, lookalike_error_message: :"nondisposable_test.typo")
+  def test_a_symbol_is_a_rails_error_name_like_the_other_messages
+    # The same meaning a Symbol has for error_message: a short name looked up
+    # through ActiveModel's chain, ending in errors.messages.<name>.
+    I18n.backend.store_translations(:en, errors: { messages: { nd_typo: "is misspelt. Try %{suggestion}" } })
+    enable(:confirmable, lookalike_error_message: :nd_typo)
 
     hard = confirmed("ana@gmial.com")
     refute hard.valid?
     assert_equal ["is misspelt. Try ana@gmail.com"], hard.errors[:email]
+    assert hard.errors.of_kind?(:email, :nd_typo)
+    refute hard.errors.of_kind?(:email, :lookalike_domain), "the hard error must never offer the checkbox"
 
     guess = ConfirmingUser.new(email: "ana@gnail.com")
     refute guess.valid?
     assert_equal ["is misspelt. Try ana@gmail.com"], guess.errors[:email]
-    assert guess.errors.of_kind?(:email, :lookalike_domain)
+    assert guess.errors.of_kind?(:email, :lookalike_domain), "the confirmable error stays identifiable"
     assert_equal "ana@gmail.com", guess.errors.details[:email].first[:suggestion]
+  end
+
+  def test_a_symbol_takes_a_per_model_translation_and_the_attribute
+    I18n.backend.store_translations(:en, errors: { messages: { nd_typo_model: "generic %{suggestion}" } })
+    I18n.backend.store_translations(:en, activerecord: { errors: { models: { user: { attributes: { email: {
+      nd_typo_model: "%{attribute} for users: did you mean %{suggestion}?"
+    } } } } } })
+    enable(:confirmable, lookalike_error_message: :nd_typo_model)
+
+    user = User.new(email: "ana@gmial.com")
+    refute user.valid?
+    assert_equal ["Email for users: did you mean ana@gmail.com?"], user.errors[:email]
+
+    other = Subscriber.new(email: "ana@gmial.com")
+    refute other.valid?
+    assert_equal ["generic ana@gmail.com"], other.errors[:email]
+  end
+
+  def test_lookalike_domain_cannot_be_the_message_name
+    # It is the TYPE of the confirmable error; as the hard error's name it
+    # would put the "yes, this is right" checkbox next to a refusal.
+    error = assert_raises(ArgumentError) { Nondisposable.configuration.lookalike_error_message = :lookalike_domain }
+    assert_match(/confirmable/, error.message)
+  end
+
+  def test_configuration_lookalike_message_resolves_a_symbol_under_errors_messages
+    I18n.backend.store_translations(:en, errors: { messages: { nd_typo_direct: "try %{suggestion}" } })
+    Nondisposable.configuration.lookalike_error_message = :nd_typo_direct
+
+    assert_equal "try ana@gmail.com", Nondisposable.configuration.lookalike_message("ana@gmail.com")
   end
 
   def test_a_symbol_answers_in_the_locale_of_the_validation_not_of_the_initializer
     available = I18n.available_locales
     I18n.available_locales = available | [:es]
-    I18n.backend.store_translations(:en, nondisposable_test: { typo: "looks like a typo. Did you mean %{suggestion}?" })
-    I18n.backend.store_translations(:es, nondisposable_test: { typo: "parece una errata. ¿Querías decir %{suggestion}?" })
-    enable(:confirmable, lookalike_error_message: :"nondisposable_test.typo")
+    I18n.backend.store_translations(:en, errors: { messages: { nd_typo_locale: "looks like a typo. Did you mean %{suggestion}?" } })
+    I18n.backend.store_translations(:es, errors: { messages: { nd_typo_locale: "parece una errata. ¿Querías decir %{suggestion}?" } })
+    enable(:confirmable, lookalike_error_message: :nd_typo_locale)
 
     I18n.with_locale(:es) do
       user = User.new(email: "ana@gmial.com")
@@ -451,12 +519,21 @@ class NondisposableLookalikeValidationTest < NondisposableTestCase
 
   def test_a_symbol_with_no_translation_falls_back_to_the_default_message
     # Never "Translation missing" in front of a user, and never an exception
-    # that on_check_failure = :allow would turn into an accepted typo.
-    enable(:confirmable, lookalike_error_message: :"nondisposable_test.no_such_key")
+    # that on_check_failure = :allow would turn into an accepted typo. Logged,
+    # so the host finds out.
+    enable(:confirmable, lookalike_error_message: :nd_no_such_key)
 
-    user = User.new(email: "ana@gmial.com")
-    refute user.valid?
-    assert_equal ["looks like a typo. Did you mean ana@gmail.com?"], user.errors[:email]
+    assert_refused_with_the_default_message("ana@gmial.com")
+    assert_equal "looks like a typo. Did you mean ana@gmail.com?", Nondisposable.configuration.lookalike_message("ana@gmail.com")
+  end
+
+  def test_a_symbol_naming_a_translation_group_falls_back_to_the_default_message
+    # I18n returns a Hash for a group; the error text would be "{...}".
+    I18n.backend.store_translations(:en, errors: { messages: { nd_group: { one: "a", other: "b" } } })
+    enable(:confirmable, lookalike_error_message: :nd_group)
+
+    assert_refused_with_the_default_message("ana@gmial.com")
+    assert_equal "looks like a typo. Did you mean ana@gmail.com?", Nondisposable.configuration.lookalike_message("ana@gmail.com")
   end
 
   def test_a_callable_is_called_with_the_suggestion
@@ -492,20 +569,19 @@ class NondisposableLookalikeValidationTest < NondisposableTestCase
   end
 
   def test_a_translation_missing_an_interpolation_argument_still_refuses
-    # I18n's default: covers a missing key, not a translation that raises.
     # A raise used to reach the validator's rescue, where :allow ACCEPTED a
     # listed reviewed typo.
     setup_disposable_domain!("gmial.com")
-    I18n.backend.store_translations(:en, nondisposable_test: { bad_var: "Did you mean %{address}?" })
-    enable(:confirmable, lookalike_error_message: :"nondisposable_test.bad_var")
+    I18n.backend.store_translations(:en, errors: { messages: { nd_bad_var: "Did you mean %{address}?" } })
+    enable(:confirmable, lookalike_error_message: :nd_bad_var)
 
     assert_refused_with_the_default_message("ana@gmial.com")
   end
 
   def test_a_raising_translation_proc_still_refuses
     setup_disposable_domain!("gmial.com")
-    I18n.backend.store_translations(:en, nondisposable_test: { raising: ->(*) { raise "boom" } })
-    enable(:confirmable, lookalike_error_message: :"nondisposable_test.raising")
+    I18n.backend.store_translations(:en, errors: { messages: { nd_raising: ->(*) { raise "boom" } } })
+    enable(:confirmable, lookalike_error_message: :nd_raising)
 
     assert_refused_with_the_default_message("ana@gmial.com")
   end
@@ -520,6 +596,48 @@ class NondisposableLookalikeValidationTest < NondisposableTestCase
     refute guess.valid?
     assert guess.errors.of_kind?(:email, :lookalike_domain)
     assert_equal ["looks like a typo. Did you mean ana@gmail.com?"], guess.errors[:email]
+  end
+
+  def test_a_nil_message_still_refuses
+    setup_disposable_domain!("gmial.com")
+    enable(:confirmable, lookalike_error_message: nil)
+
+    assert_refused_with_the_default_message("ana@gmial.com")
+    guess = ConfirmingUser.new(email: "ana@gnail.com")
+    refute guess.valid?
+    assert guess.errors.of_kind?(:email, :lookalike_domain)
+  end
+
+  def test_a_zero_argument_lambda_still_refuses
+    setup_disposable_domain!("gmial.com")
+    enable(:confirmable, lookalike_error_message: -> { "no suggestion for you" })
+
+    assert_refused_with_the_default_message("ana@gmial.com")
+  end
+
+  def test_a_callable_returning_something_other_than_a_string_still_refuses
+    enable(:confirmable, lookalike_error_message: ->(_suggestion) { nil })
+
+    assert_refused_with_the_default_message("ana@gmial.com")
+  end
+
+  def test_backslashes_in_the_local_part_are_printed_not_read_as_back_references
+    # String#sub with a String replacement reads \0 and \& as the match.
+    email = 'a\0b\&c@gmial.com'
+
+    user = User.new(email: email)
+    enable
+    refute user.valid?
+    assert_equal ['looks like a typo. Did you mean a\0b\&c@gmail.com?'], user.errors[:email]
+
+    Nondisposable.configuration.lookalike_error_message = "typo: %{suggestion}"
+    refute user.valid?
+    assert_equal ['typo: a\0b\&c@gmail.com'], user.errors[:email]
+
+    # And through the fallback.
+    Nondisposable.configuration.lookalike_error_message = nil
+    refute user.valid?
+    assert_equal ['looks like a typo. Did you mean a\0b\&c@gmail.com?'], user.errors[:email]
   end
 
   private
