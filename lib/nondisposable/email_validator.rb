@@ -242,30 +242,57 @@ module ActiveModel
       # messages are added.
       #
       # A Symbol resolves through the same ActiveModel chain as every other
-      # Rails error name, but NOW, once, into a String (see
-      # Nondisposable::LookalikeError for why it is never resolved again). A
+      # Rails error name, and the confirmable error still honours a per-model
+      # `lookalike_domain` translation (#confirmable_message) — but NOW, once,
+      # into a String (see Nondisposable::LookalikeError for why it is never
+      # resolved again). A
       # translation that is missing, names a variable we don't pass, or is a
       # whole group (a Hash) is a refusal with a broken message, and we refuse
       # with the default message instead — never a raise, which
       # on_check_failure = :allow would turn into an acceptance.
       def add_lookalike_error(record, attribute, config, suggestion, confirmable:)
         key = config.lookalike_error_message
-        message =
-          if key.is_a?(Symbol)
-            resolve_rails_message(record, attribute, config, key, suggestion) || config.default_lookalike_message(suggestion)
-          else
-            config.lookalike_message(suggestion)
-          end
 
         if confirmable
-          add_resolved(record, attribute, :lookalike_domain, message, suggestion)
+          add_resolved(record, attribute, :lookalike_domain, confirmable_message(record, attribute, config, suggestion), suggestion)
         elsif key.is_a?(Symbol)
+          message = resolve_rails_message(record, attribute, config, key, suggestion) || config.default_lookalike_message(suggestion)
           add_resolved(record, attribute, key, message, suggestion)
         else
-          # A plain String error: never interpolated when read, nothing to freeze.
-          record.errors.add(attribute, message)
+          # A plain String error, as since 0.5.0: no translation lookup, and
+          # never interpolated when read, so nothing to freeze.
+          record.errors.add(attribute, config.lookalike_message(suggestion))
         end
         nil
+      end
+
+      # The confirmable error's text, computed exactly as ActiveModel used to
+      # compute it on every read of `errors.add(attr, :lookalike_domain,
+      # message: …)`, but once:
+      #
+      # - A Symbol replaces the type in Rails' lookup, so it is its own
+      #   chain (#resolve_rails_message).
+      # - Anything else is the default for the FIRST key of the chain,
+      #   activemodel/activerecord.errors.models.<model>.attributes.<attr>.lookalike_domain,
+      #   so an app that translated that key keeps its translation (it did
+      #   until 0.6.1, and must not lose it on upgrade). A String goes in as
+      #   the template it is, with %{suggestion} as a VALUE: I18n never
+      #   rescans a value, so a `%{x}` the user typed is printed, not
+      #   interpolated. A callable's (or a #sub object's) output is already
+      #   final, so its `%` are escaped for the same reason.
+      def confirmable_message(record, attribute, config, suggestion)
+        key = config.lookalike_error_message
+        if key.is_a?(Symbol)
+          return resolve_rails_message(record, attribute, config, key, suggestion) || config.default_lookalike_message(suggestion)
+        end
+
+        template = key.is_a?(String) ? key : config.lookalike_message(suggestion).gsub('%', '%%')
+        text = record.errors.generate_message(attribute, :lookalike_domain, message: template, suggestion: suggestion)
+        raise TypeError, "it resolved to #{text.class}, not a String" unless text.is_a?(String)
+
+        text
+      rescue StandardError => e
+        config.default_lookalike_message(suggestion, e) # logs it
       end
 
       # Errors#add would build an ActiveModel::Error that re-resolves its

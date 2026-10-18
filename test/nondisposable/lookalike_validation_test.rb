@@ -18,6 +18,13 @@ class NondisposableLookalikeValidationTest < NondisposableTestCase
     ConfirmingUser.new(email: email, email_lookalike_confirmed: "1")
   end
 
+  # Translations stored by a test are global; a per-model lookalike_domain
+  # one would change every later test's message. Back to the load path.
+  def teardown
+    I18n.backend.reload!
+    super
+  end
+
   # =========================================================================
   # Off by default — unchanged
   # =========================================================================
@@ -688,6 +695,98 @@ class NondisposableLookalikeValidationTest < NondisposableTestCase
     other.errors.merge!(hard.errors)
     assert_equal ["kept ana@gmail.com"], other.errors[:email]
     assert_equal ["kept ana@gmail.com"], hard.errors.dup[:email]
+  end
+
+  # ---- A per-model translation of :lookalike_domain (as until 0.6.1) -------
+
+  def store_model_translation!(model, key, text)
+    I18n.backend.store_translations(:en, activerecord: { errors: { models: { model => { attributes: { email: { key => text } } } } } })
+  end
+
+  def test_a_per_model_lookalike_domain_translation_still_wins_over_the_configured_string
+    # Until 0.6.1 the confirmable error was errors.add(attr, :lookalike_domain,
+    # message: <the String>), and ActiveModel tried this key before the String.
+    store_model_translation!(:confirming_user, :lookalike_domain, "custom translation %{suggestion}")
+    enable
+
+    guess = ConfirmingUser.new(email: "ana@gnail.com")
+    refute guess.valid?
+    assert_equal ["custom translation ana@gmail.com"], guess.errors[:email]
+    assert guess.errors.of_kind?(:email, :lookalike_domain)
+
+    Nondisposable.configuration.lookalike_error_message = "configured %{suggestion}"
+    refute guess.valid?
+    assert_equal ["custom translation ana@gmail.com"], guess.errors[:email]
+
+    # Typed input is still a value, never a pattern.
+    typed = ConfirmingUser.new(email: "a%{x}b@gnail.com")
+    refute typed.valid?
+    assert_equal ["custom translation a%{x}b@gmail.com"], typed.errors[:email]
+
+    # Another model, without the translation, gets the configured String.
+    plain = User.new(email: "ana@gnail.com")
+    refute plain.valid?
+    assert_equal ["configured ana@gmail.com"], plain.errors[:email]
+  end
+
+  def test_a_configured_string_is_interpolated_like_any_rails_message_on_the_confirmable_error
+    # As until 0.6.1: %{attribute} and %{value} work there too.
+    enable(:confirmable, lookalike_error_message: "%{attribute} %{value}: did you mean %{suggestion}?")
+
+    guess = User.new(email: "ana@gnail.com")
+    refute guess.valid?
+    assert_equal ["Email ana@gnail.com: did you mean ana@gmail.com?"], guess.errors[:email]
+  end
+
+  def test_a_per_model_translation_also_wins_over_a_callable_and_its_output_is_not_interpolated
+    enable(:confirmable, lookalike_error_message: ->(suggestion) { "callable #{suggestion}" })
+
+    typed = User.new(email: "a%{x}b@gnail.com")
+    refute typed.valid?
+    assert_equal ["callable a%{x}b@gmail.com"], typed.errors[:email]
+
+    store_model_translation!(:confirming_user, :lookalike_domain, "custom translation %{suggestion}")
+    guess = ConfirmingUser.new(email: "ana@gnail.com")
+    refute guess.valid?
+    assert_equal ["custom translation ana@gmail.com"], guess.errors[:email]
+  end
+
+  def test_the_hard_string_error_stays_a_plain_message_as_since_0_5_0
+    # It was never looked up: a per-model lookalike_domain translation is for
+    # the confirmable error only.
+    store_model_translation!(:user, :lookalike_domain, "custom translation %{suggestion}")
+    enable
+
+    hard = User.new(email: "ana@gmial.com")
+    refute hard.valid?
+    assert_equal ["looks like a typo. Did you mean ana@gmail.com?"], hard.errors[:email]
+  end
+
+  def test_a_symbol_uses_its_own_per_model_translation_for_the_confirmable_error_too
+    I18n.backend.store_translations(:en, errors: { messages: { nd_chain: "generic %{suggestion}" } })
+    store_model_translation!(:confirming_user, :nd_chain, "per model %{suggestion}")
+    enable(:confirmable, lookalike_error_message: :nd_chain)
+
+    guess = ConfirmingUser.new(email: "ana@gnail.com")
+    refute guess.valid?
+    assert_equal ["per model ana@gmail.com"], guess.errors[:email]
+    assert guess.errors.of_kind?(:email, :lookalike_domain)
+
+    other = User.new(email: "ana@gnail.com")
+    refute other.valid?
+    assert_equal ["generic ana@gmail.com"], other.errors[:email]
+  end
+
+  def test_a_configured_string_with_an_unknown_variable_falls_back_on_the_confirmable_error
+    enable(:confirmable, lookalike_error_message: "did you mean %{address}?")
+
+    log = capture_log do
+      guess = User.new(email: "ana@gnail.com")
+      refute guess.valid?
+      assert guess.errors.of_kind?(:email, :lookalike_domain)
+      assert_equal ["looks like a typo. Did you mean ana@gmail.com?"], guess.errors[:email]
+    end
+    assert_match(/lookalike_error_message/, log)
   end
 
   def test_a_nil_message_still_refuses
