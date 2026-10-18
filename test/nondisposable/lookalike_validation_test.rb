@@ -369,6 +369,47 @@ class NondisposableLookalikeValidationTest < NondisposableTestCase
     assert_equal ["provider is not allowed"], user.errors[:email]
   end
 
+  def test_a_certain_correction_needs_no_database
+    # A reviewed typo is known before the blocklist is asked, so a lookup that
+    # raises can neither wave it through (:allow) nor swap the correction
+    # for the generic infrastructure error (:reject).
+    enable
+    %i[allow reject].each do |mode|
+      Nondisposable.configuration.on_check_failure = mode
+      Nondisposable::DisposableDomain.stub(:disposable?, ->(*) { raise "database down" }) do
+        user = confirmed("ana@gmial.com")
+        refute user.valid?, "on_check_failure = #{mode.inspect} must still refuse a reviewed typo"
+        assert_equal ["looks like a typo. Did you mean ana@gmail.com?"], user.errors[:email]
+      end
+    end
+  end
+
+  def test_an_impossible_tld_correction_needs_no_database
+    Nondisposable.configuration.check_tld = true
+    Nondisposable::DisposableDomain.stub(:disposable?, ->(*) { raise "database down" }) do
+      user = User.new(email: "ana@gmail.con")
+      refute user.valid?
+      assert_equal ["looks like a typo. Did you mean ana@gmail.com?"], user.errors[:email]
+    end
+  end
+
+  def test_a_listed_throwaway_never_pays_for_the_ranker
+    # The ranker is the expensive part (a distance walk over ~250 providers)
+    # and a guess never outranks the blocklist, so a listed throwaway with no
+    # certain correction must be refused without running it.
+    setup_disposable_domain!("tempmail.com")
+    setup_disposable_domain!("gotmail.com")
+    enable(:confirmable, check_tld: true)
+
+    Nondisposable::Suggestion.stub(:guess, ->(*) { flunk "the ranker ran for a listed throwaway" }) do
+      %w[ana@tempmail.com ana@gotmail.com].each do |email|
+        user = User.new(email: email)
+        refute user.valid?
+        assert_equal ["provider is not allowed"], user.errors[:email]
+      end
+    end
+  end
+
   # =========================================================================
   # lookalike_error_message: String, I18n key or callable (0.6.2)
   # =========================================================================
@@ -448,5 +489,47 @@ class NondisposableLookalikeValidationTest < NondisposableTestCase
     user = User.new(email: "ana@gmial.com")
     refute user.valid?
     assert_equal ["custom ana@gmail.com"], user.errors[:email]
+  end
+
+  def test_a_translation_missing_an_interpolation_argument_still_refuses
+    # I18n's default: covers a missing key, not a translation that raises.
+    # A raise used to reach the validator's rescue, where :allow ACCEPTED a
+    # listed reviewed typo.
+    setup_disposable_domain!("gmial.com")
+    I18n.backend.store_translations(:en, nondisposable_test: { bad_var: "Did you mean %{address}?" })
+    enable(:confirmable, lookalike_error_message: :"nondisposable_test.bad_var")
+
+    assert_refused_with_the_default_message("ana@gmial.com")
+  end
+
+  def test_a_raising_translation_proc_still_refuses
+    setup_disposable_domain!("gmial.com")
+    I18n.backend.store_translations(:en, nondisposable_test: { raising: ->(*) { raise "boom" } })
+    enable(:confirmable, lookalike_error_message: :"nondisposable_test.raising")
+
+    assert_refused_with_the_default_message("ana@gmial.com")
+  end
+
+  def test_a_raising_callable_still_refuses
+    setup_disposable_domain!("gmial.com")
+    enable(:confirmable, lookalike_error_message: ->(_suggestion) { raise "boom" })
+
+    assert_refused_with_the_default_message("ana@gmial.com")
+    # The confirmable error goes through the same resolution.
+    guess = ConfirmingUser.new(email: "ana@gnail.com")
+    refute guess.valid?
+    assert guess.errors.of_kind?(:email, :lookalike_domain)
+    assert_equal ["looks like a typo. Did you mean ana@gmail.com?"], guess.errors[:email]
+  end
+
+  private
+
+  def assert_refused_with_the_default_message(email)
+    log = capture_log do
+      user = User.new(email: email)
+      refute user.valid?, "a broken message must never turn a refusal into an acceptance"
+      assert_equal ["looks like a typo. Did you mean #{email.sub('gmial', 'gmail')}?"], user.errors[:email]
+    end
+    assert_match(/lookalike_error_message/, log)
   end
 end

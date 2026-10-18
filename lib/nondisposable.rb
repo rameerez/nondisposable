@@ -196,20 +196,35 @@ module Nondisposable
     # being validated rather than whichever locale the initializer ran in.
     #
     # - A Symbol is an I18n key, looked up with `suggestion:` to interpolate.
-    #   A missing translation falls back to the default English message: it
-    #   must never print "Translation missing" to a user, nor raise and let
-    #   on_check_failure = :allow wave a reviewed typo through.
+    #   A missing translation falls back to the default English message
+    #   rather than printing "Translation missing" to a user.
     # - Anything that responds to #call is called with the suggestion.
     # - Anything else is treated as before 0.6.2: `%{suggestion}` replaced
     #   with #sub. That keeps a String exactly as it was, and keeps working
     #   any object a host passed that answers #sub (the only way to localise
     #   this message until now).
+    #
+    # NEVER RAISES. By the time we phrase this message the address is already
+    # refused; the only open question is the wording. A translation naming a
+    # variable we don't pass (`%{address}`), a translation Proc or a callable
+    # that raises would otherwise reach the validator's rescue, where the
+    # default on_check_failure = :allow ACCEPTS the address — a listed typo
+    # let through by a broken locale file. So any failure falls back to the
+    # default English message, logged so the host can fix it.
     def lookalike_message(suggestion)
       message = lookalike_error_message
       return I18n.t(message, suggestion: suggestion, default: DEFAULT_LOOKALIKE_ERROR_MESSAGE) if message.is_a?(Symbol)
       return message.call(suggestion).to_s if message.respond_to?(:call)
 
       message.sub('%{suggestion}', suggestion)
+    rescue StandardError => e
+      log_message = "[nondisposable] Could not build lookalike_error_message (#{e.class}: #{e.message}); using the default message, the address is still refused."
+      if defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
+        Rails.logger.error(log_message)
+      else
+        warn log_message
+      end
+      DEFAULT_LOOKALIKE_ERROR_MESSAGE.sub('%{suggestion}', suggestion.to_s)
     end
 
     # What the validator does when the disposable check itself raises

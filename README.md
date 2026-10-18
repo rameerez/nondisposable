@@ -254,7 +254,7 @@ config.reject_lookalike_domains = :confirmable # `true` means the same thing
 
 A disposable provider is refused before any **guess** (a confirmable "did you mean" would only let the user confirm an address that is then refused anyway), and a blocked TLD is still refused after a confirmation. A host's `additional_email_providers` outranks the known-typo list.
 
-The two **hard** corrections — an impossible TLD and a reviewed typo — are answered before the disposable check (since 0.6.2). Upstream blocklists carry some reviewed typos (the bundled snapshot lists `gmial.com`, `hotmai.com` and `hotmial.com`), and the address is refused either way; but `ana@gmial.com` is a person who missed a key, not someone hiding behind a temporary inbox, so they get "Did you mean ana@gmail.com?" rather than the disposable message. Before 0.6.2 these typos got the disposable message whenever the table was loaded.
+The two **hard** corrections — an impossible TLD and a reviewed typo — are answered before the disposable check, without a database query (since 0.6.2). Upstream blocklists carry some reviewed typos (the bundled snapshot lists `gmial.com`, `hotmai.com` and `hotmial.com`), and the address is refused either way; but `ana@gmial.com` is a person who missed a key, not someone hiding behind a temporary inbox, so they get "Did you mean ana@gmail.com?" rather than the disposable message. Before 0.6.2 these typos got the disposable message whenever the table was loaded.
 
 The known-typo list is short (41 entries) on purpose. An entry needs direct evidence that nobody has a mailbox there — a redirect to the provider or the provider's own DNS (`yaho.com`, `homail.com`), a parking or for-sale network (`gamail.com`, `hotmial.com`), a typosquat redirect or catch-all (`gmial.com`, `gmali.com`), or a registered domain with no MX, A or AAAA record (`gmal.com`). "No MX" alone is not enough: SMTP falls back to the A record. The evidence for every entry is in `test/fixtures/lookalike_corpus.csv`, and the suite fails if an entry loses it.
 
@@ -319,7 +319,7 @@ es:
       email_typo: "parece una errata. ¿Querías decir %{suggestion}?"
 ```
 
-`%{suggestion}` is the full corrected address (`ana@gmail.com`), or just the corrected domain when nothing was typed before the `@`. A key with no translation in the current locale falls back to the default English message, never to "Translation missing". For anything else, pass a callable: `config.lookalike_error_message = ->(suggestion) { I18n.t("errors.email_typo", suggestion: suggestion) }`. A String works exactly as before.
+`%{suggestion}` is the full corrected address (`ana@gmail.com`), or just the corrected domain when nothing was typed before the `@`. A key with no translation in the current locale falls back to the default English message, never to "Translation missing"; so does a translation or callable that raises (logged), because the address is refused either way and a broken locale file must never let it through. For anything else, pass a callable: `config.lookalike_error_message = ->(suggestion) { I18n.t("errors.email_typo", suggestion: suggestion) }`. A String works exactly as before.
 
 ### Direct Check
 
