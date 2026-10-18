@@ -17,6 +17,14 @@ module Nondisposable
   # test/fixtures/lookalike_corpus.csv, and the test suite fails if an entry
   # loses it. Nothing generates this list automatically; see the file's header
   # for the bar an entry has to clear.
+  #
+  # Upstream blocklists list some of these too: the bundled snapshot has
+  # `gmial.com`, `hotmai.com` and `hotmial.com`. That is left alone on purpose: both lists say "refuse it", and dropping the typos from
+  # the stored list would let them through for every host that never switched
+  # the lookalike layer on, and for every Nondisposable.disposable? caller.
+  # What the overlap must not change is the MESSAGE, and the validator settles
+  # that by asking this list before the throwaway check (see
+  # NondisposableValidator), whatever the daily update brings in.
   module KnownTypos
     LIST_PATH = File.expand_path('../../data/known_typo_domains.txt', __dir__)
 

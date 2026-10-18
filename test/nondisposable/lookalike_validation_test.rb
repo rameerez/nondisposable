@@ -257,6 +257,119 @@ class NondisposableLookalikeValidationTest < NondisposableTestCase
   end
 
   # =========================================================================
+  # A reviewed typo the blocklist also lists (0.6.2)
+  #
+  # Upstream lists carry some of our reviewed typos (the bundled snapshot has
+  # gmial.com, hotmai.com and hotmial.com). Both verdicts refuse the address;
+  # these tests pin which MESSAGE wins: the correction, because it is the one
+  # that is true about the person typing.
+  # =========================================================================
+
+  def test_a_known_typo_in_the_bundled_blocklist_gets_its_correction_once_the_table_is_loaded
+    assert Nondisposable::DomainListUpdater.seed
+    enable
+
+    { "gmial.com" => "gmail.com", "hotmai.com" => "hotmail.com", "hotmial.com" => "hotmail.com" }.each do |typo, correction|
+      # Not vacuous: the table really does list it.
+      assert Nondisposable.disposable?("ana@#{typo}"), "#{typo} is expected in the bundled blocklist"
+
+      user = confirmed("ana@#{typo}")
+      refute user.valid?
+      assert_equal ["looks like a typo. Did you mean ana@#{correction}?"], user.errors[:email]
+      refute user.errors.of_kind?(:email, :lookalike_domain), "a reviewed typo is hard, listed or not"
+    end
+  end
+
+  def test_every_known_typo_gets_its_correction_even_if_a_blocklist_lists_it
+    # The worst case, independent of today's upstream data: every reviewed
+    # typo listed as a throwaway. The daily update can add any of them.
+    Nondisposable::KnownTypos.all.each_key { |typo| setup_disposable_domain!(typo) }
+    enable
+
+    Nondisposable::KnownTypos.all.each do |typo, correction|
+      user = confirmed("someone@#{typo}")
+      refute user.valid?
+      assert_equal ["looks like a typo. Did you mean someone@#{correction}?"], user.errors[:email], typo
+    end
+  end
+
+  def test_a_listed_known_typo_without_a_local_part_names_the_domain
+    setup_disposable_domain!("gmial.com")
+    enable
+
+    user = User.new(email: "@gmial.com")
+    refute user.valid?
+    assert_equal ["looks like a typo. Did you mean gmail.com?"], user.errors[:email]
+  end
+
+  def test_the_correction_also_outranks_a_custom_throwaway_message
+    setup_disposable_domain!("gmial.com")
+    setup_disposable_domain!("tempmail.com")
+    enable
+
+    typo = Subscriber.new(email: "ana@gmial.com")
+    refute typo.valid?
+    assert_equal ["looks like a typo. Did you mean ana@gmail.com?"], typo.errors[:email]
+
+    throwaway = Subscriber.new(email: "ana@tempmail.com")
+    refute throwaway.valid?
+    assert_equal ["is a throwaway address"], throwaway.errors[:email]
+  end
+
+  def test_a_listed_impossible_tld_with_a_correction_gets_the_correction
+    # The other HARD correction. With check_tld alone, as with the lookalike
+    # layer on: no mail reaches `.con`, so a blocklist entry adds nothing.
+    setup_disposable_domain!("gmail.con")
+    Nondisposable.configuration.check_tld = true
+
+    user = User.new(email: "ana@gmail.con")
+    refute user.valid?
+    assert_equal ["looks like a typo. Did you mean ana@gmail.com?"], user.errors[:email]
+  end
+
+  def test_a_guess_the_blocklist_lists_is_still_refused_as_a_throwaway
+    # `gotmail.com` is one finger from hotmail.com AND a listed throwaway in
+    # the bundled snapshot. A guess is confirmable; asking "did you mean
+    # hotmail.com?" would let the user tick "yes" only to be refused anyway.
+    assert Nondisposable::DomainListUpdater.seed
+    enable
+    assert_equal "ana@hotmail.com", Nondisposable.suggestion_for("ana@gotmail.com")
+    refute Nondisposable::KnownTypos.include?("gotmail.com")
+
+    [ConfirmingUser.new(email: "ana@gotmail.com"), confirmed("ana@gotmail.com")].each do |user|
+      refute user.valid?
+      assert_equal ["provider is not allowed"], user.errors[:email]
+      refute user.errors.of_kind?(:email, :lookalike_domain)
+    end
+  end
+
+  def test_with_the_lookalike_layer_off_a_listed_typo_keeps_the_throwaway_message
+    # Nothing about the order changes for hosts that never switched it on:
+    # the table refuses gmial.com, as it always has.
+    setup_disposable_domain!("gmial.com")
+
+    user = User.new(email: "ana@gmial.com")
+    refute user.valid?
+    assert_equal ["provider is not allowed"], user.errors[:email]
+
+    enable(:confirmable, lookalike_distance: 0)
+    user = User.new(email: "ana@gmial.com")
+    refute user.valid?
+    assert_equal ["provider is not allowed"], user.errors[:email]
+  end
+
+  def test_a_host_provider_listed_as_a_throwaway_is_refused_as_a_throwaway
+    # additional_email_providers takes a domain off the known-typo list; it
+    # does not unlist it. With no correction to offer, the table speaks.
+    setup_disposable_domain!("gmial.com")
+    enable(:confirmable, additional_email_providers: %w[gmial.com])
+
+    user = User.new(email: "ana@gmial.com")
+    refute user.valid?
+    assert_equal ["provider is not allowed"], user.errors[:email]
+  end
+
+  # =========================================================================
   # lookalike_error_message: String, I18n key or callable (0.6.2)
   # =========================================================================
 

@@ -3,23 +3,54 @@
 module ActiveModel
   module Validations
     class NondisposableValidator < EachValidator
-      # Three independent questions about one address, in the order a human
-      # would ask them, and AT MOST ONE error however many of them fire —
-      # stacking "provider is not allowed" on top of "did you mean gmail.com?"
-      # helps nobody:
+      # Three independent questions about one address, and AT MOST ONE error
+      # however many of them fire — stacking "provider is not allowed" on top
+      # of "did you mean gmail.com?" helps nobody:
       #
-      #   1. Is this a throwaway provider?     (always on — the gem's whole job)
-      #   2. Can we name the address they meant? (config.reject_lookalike_domains,
-      #      or any invalid TLD we can correct — see below)
-      #   3. Is the TLD real, and allowed?     (config.check_tld)
+      #   - Is this a throwaway provider?        (always on — the gem's whole job)
+      #   - Can we name the address they meant?  (config.reject_lookalike_domains,
+      #     or any invalid TLD we can correct — see below)
+      #   - Is the TLD real, and allowed?        (config.check_tld)
+      #
+      # The answer is chosen in this order, first match wins:
+      #
+      #   1. A HARD correction: an impossible TLD or a reviewed typo we can name
+      #      the fix for (`gmail.con`, `gmial.com`). "Did you mean …?"
+      #   2. A throwaway provider. "provider is not allowed"
+      #   3. A GUESS (`gnail.com`): the same "Did you mean …?", but confirmable.
+      #   4. An invalid or blocked TLD.
+      #
+      # WHY A HARD CORRECTION OUTRANKS THE THROWAWAY CHECK (since 0.6.2)
+      #
+      # Upstream blocklists carry some of the very typos we reviewed: the
+      # bundled snapshot lists `gmial.com`, `hotmai.com` and `hotmial.com`.
+      # Both verdicts refuse the address, so the order only decides the
+      # MESSAGE, and only one of them is true about the person typing: someone
+      # at `ana@gmial.com` did not pick a temporary inbox, they missed a key
+      # on the way to gmail.com. Being told their provider is a throwaway
+      # sends them looking for a problem they don't have; "Did you mean
+      # ana@gmail.com?" fixes it in one click. A hard correction is certain (no mail reaches
+      # `.con`; somebody checked `gmial.com`), so it is safe to let it phrase a
+      # refusal the blocklist would have made anyway. Until 0.6.2 the throwaway
+      # check ran first, and these typos got the wrong message whenever the
+      # table was loaded.
+      #
+      # A guess stays BEHIND the throwaway check. It is only a likelihood, and
+      # the user can answer it: `gotmail.com` and `tmail.com` are both one
+      # finger from a provider AND listed throwaways, so asking "did you mean
+      # hotmail.com?" there would let them tick "yes, this is right" only to
+      # be refused anyway on the next submit. A listed throwaway is the
+      # stronger evidence, and the more useful answer.
       #
       # WHY A NAMEABLE CORRECTION OUTRANKS THE GENERIC TLD ERROR
       #
-      # `user@gmail.con` fails both 2 and 3. "Doesn't look like a real email
-      # address" is true but useless; "Did you mean user@gmail.com?" is the same
-      # verdict with the fix attached. So whenever we can name a correction we
-      # use that message, whether the TLD was invalid or merely lookalike. The
-      # rule is: a suggestion, if we have one, always phrases the rejection.
+      # `user@gmail.con` fails both the lookalike and the TLD question. "Doesn't
+      # look like a real email address" is true but useless; "Did you mean
+      # user@gmail.com?" is the same verdict with the fix attached. So whenever
+      # we can name a correction we use that message, whether the TLD was
+      # invalid or merely lookalike. The rule is: a suggestion, if we have one,
+      # always phrases the rejection — unless it is a guess about a domain we
+      # KNOW is a throwaway (above).
       #
       # HARD vs CONFIRMABLE — WHICH LOOKALIKES CAN BE WAVED THROUGH
       #
@@ -58,52 +89,37 @@ module ActiveModel
             return reject(record, attribute, config.invalid_tld_error_message)
           end
 
+          spelling = spelling_of(value, config)
+
           if Nondisposable::DisposableDomain.disposable?(domain)
+            # A reviewed typo the blocklist ALSO lists still gets its
+            # correction: see "why a hard correction outranks the throwaway
+            # check" above.
+            return reject(record, attribute, config.lookalike_message(spelling.suggestion)) if spelling&.hard
+
             return reject(record, attribute, options[:message] || config.error_message)
           end
 
-          return unless config.check_tld || config.reject_lookalike_domains
-          # No "@" at all is a malformed value, and this validator has never
-          # judged shape — that is what `format:` is for (see the README). Note
-          # `example@gmailmcom` DOES have one: a domain missing its dot is a real
-          # address at an impossible domain, which is very much our business.
-          return unless value.to_s.include?('@')
-          return unless Nondisposable::Tld.judgeable?(value)
+          return unless spelling
 
-          # nil here means the domain has NO TLD (`example@gmailmcom` — a
-          # production-shaped typo that missed the dot), which fails "must end in a real TLD"
-          # just as surely as `.con` does.
-          tld = Nondisposable::Tld.extract(value)
-          impossible = tld.nil? || !Nondisposable::Tld.valid?(tld)
-          invalid = config.check_tld && impossible
-          blocked = config.check_tld && !invalid && Nondisposable::Tld.blocked?(tld)
+          if spelling.suggestion
+            message = config.lookalike_message(spelling.suggestion)
+            # Hard: no confirmation can make an impossible TLD deliverable —
+            # whether or not the host turned check_tld on, `gmail.con` cannot
+            # receive the confirmation email — and a reviewed typo is not a
+            # guess. The error stays a plain message, exactly as before 0.5.0.
+            return reject(record, attribute, message) if spelling.hard
 
-          if invalid || config.reject_lookalike_domains
-            suggestion = Nondisposable::Suggestion.for(value)
-            # `@gmial.com` has no local part to build "Did you mean ..." from,
-            # but it is still a reviewed typo: name the domain instead.
-            if suggestion.nil? && config.lookalike_distance.to_i.positive?
-              suggestion = Nondisposable::KnownTypos.correction_for(value)
-            end
-            if suggestion
-              message = config.lookalike_message(suggestion)
-              # Hard: no confirmation can make an impossible TLD deliverable —
-              # whether or not the host turned check_tld on, `gmail.con` cannot
-              # receive the confirmation email — and a reviewed typo is not a
-              # guess. The error stays a plain message, exactly as before 0.5.0.
-              return reject(record, attribute, message) if impossible || Nondisposable::KnownTypos.include?(value)
-
-              unless Nondisposable::ConfirmableEmail.confirmed?(record, attribute)
-                # Typed, so a form can tell this error apart and offer the
-                # "yes, this is right" checkbox: errors.of_kind?(:email, :lookalike_domain).
-                record.errors.add(attribute, :lookalike_domain, message: message, suggestion: suggestion)
-                return
-              end
+            unless Nondisposable::ConfirmableEmail.confirmed?(record, attribute)
+              # Typed, so a form can tell this error apart and offer the
+              # "yes, this is right" checkbox: errors.of_kind?(:email, :lookalike_domain).
+              record.errors.add(attribute, :lookalike_domain, message: message, suggestion: spelling.suggestion)
+              return
             end
           end
 
-          return reject(record, attribute, config.invalid_tld_error_message) if invalid
-          return reject(record, attribute, config.blocked_tld_error_message) if blocked
+          return reject(record, attribute, config.invalid_tld_error_message) if spelling.invalid
+          return reject(record, attribute, config.blocked_tld_error_message) if spelling.blocked
         rescue StandardError => e
           if Nondisposable.configuration.on_check_failure == :reject
             Rails.logger.error "[nondisposable] Nondisposable validation error: #{e.message} — rejecting #{attribute} (on_check_failure = :reject)"
@@ -115,6 +131,53 @@ module ActiveModel
       end
 
       private
+
+      # What the TLD and lookalike checks make of an address, worked out once
+      # because two branches need it: the throwaway branch asks only whether a
+      # HARD correction exists, the checks after it need the rest.
+      #
+      #   suggestion  the corrected address (or domain), or nil
+      #   hard        a suggestion no confirmation can override
+      #   invalid     the TLD fails check_tld
+      #   blocked     the TLD is real, but blocked_tlds/allowed_tlds refuse it
+      Spelling = Struct.new(:suggestion, :hard, :invalid, :blocked, keyword_init: true)
+      private_constant :Spelling
+
+      # nil when neither check applies to this value at all.
+      def spelling_of(value, config)
+        return nil unless config.check_tld || config.reject_lookalike_domains
+        # No "@" at all is a malformed value, and this validator has never
+        # judged shape — that is what `format:` is for (see the README). Note
+        # `example@gmailmcom` DOES have one: a domain missing its dot is a real
+        # address at an impossible domain, which is very much our business.
+        return nil unless value.to_s.include?('@')
+        return nil unless Nondisposable::Tld.judgeable?(value)
+
+        # nil here means the domain has NO TLD (`example@gmailmcom` — a
+        # production-shaped typo that missed the dot), which fails "must end in a real TLD"
+        # just as surely as `.con` does.
+        tld = Nondisposable::Tld.extract(value)
+        impossible = tld.nil? || !Nondisposable::Tld.valid?(tld)
+        invalid = config.check_tld && impossible
+        blocked = config.check_tld && !invalid && Nondisposable::Tld.blocked?(tld)
+
+        suggestion = nil
+        if invalid || config.reject_lookalike_domains
+          suggestion = Nondisposable::Suggestion.for(value)
+          # `@gmial.com` has no local part to build "Did you mean ..." from,
+          # but it is still a reviewed typo: name the domain instead.
+          if suggestion.nil? && config.lookalike_distance.to_i.positive?
+            suggestion = Nondisposable::KnownTypos.correction_for(value)
+          end
+        end
+
+        Spelling.new(
+          suggestion: suggestion,
+          hard: !suggestion.nil? && (impossible || Nondisposable::KnownTypos.include?(value)),
+          invalid: invalid,
+          blocked: blocked
+        )
+      end
 
       def reject(record, attribute, message)
         record.errors.add(attribute, message)

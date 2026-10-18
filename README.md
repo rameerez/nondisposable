@@ -252,7 +252,9 @@ config.reject_lookalike_domains = :confirmable # `true` means the same thing
 | any other lookalike the ranker suggests | `gnail.com` | **confirmable**: same message, unless the user confirmed the address |
 | anything else | `ge.com`, `yahoo.com.au` | accepted |
 
-A disposable provider is still refused first, and a blocked TLD is still refused after a confirmation. A host's `additional_email_providers` outranks the known-typo list.
+A disposable provider is refused before any **guess** (a confirmable "did you mean" would only let the user confirm an address that is then refused anyway), and a blocked TLD is still refused after a confirmation. A host's `additional_email_providers` outranks the known-typo list.
+
+The two **hard** corrections — an impossible TLD and a reviewed typo — are answered before the disposable check (since 0.6.2). Upstream blocklists carry some reviewed typos (the bundled snapshot lists `gmial.com`, `hotmai.com` and `hotmial.com`), and the address is refused either way; but `ana@gmial.com` is a person who missed a key, not someone hiding behind a temporary inbox, so they get "Did you mean ana@gmail.com?" rather than the disposable message. Before 0.6.2 these typos got the disposable message whenever the table was loaded.
 
 The known-typo list is short (41 entries) on purpose. An entry needs direct evidence that nobody has a mailbox there — a redirect to the provider or the provider's own DNS (`yaho.com`, `homail.com`), a parking or for-sale network (`gamail.com`, `hotmial.com`), a typosquat redirect or catch-all (`gmial.com`, `gmali.com`), or a registered domain with no MX, A or AAAA record (`gmal.com`). "No MX" alone is not enough: SMTP falls back to the A record. The evidence for every entry is in `test/fixtures/lookalike_corpus.csv`, and the suite fails if an entry loses it.
 
@@ -296,6 +298,7 @@ At most one error is added, however many checks fire — and whenever the gem ca
 | `user@gnail.com` | accepted | same message, confirmable |
 | `user@ge.com` | accepted | accepted |
 | `user@tempmail.com` | "provider is not allowed" | same |
+| `user@gmial.com` (a reviewed typo the blocklist also lists) | "provider is not allowed" | "looks like a typo. Did you mean user@gmail.com?" |
 
 "Doesn't look like a real email address" is true but useless when we know what they meant, so a nameable correction always outranks the generic message.
 
