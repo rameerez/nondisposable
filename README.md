@@ -135,7 +135,7 @@ Nondisposable.configure do |config|
 
   config.invalid_tld_error_message = "doesn't look like a real email address"
   config.blocked_tld_error_message = "domain ending is not allowed"
-  config.lookalike_error_message = "looks like a typo. Did you mean %{suggestion}?"
+  config.lookalike_error_message = "looks like a typo. Did you mean %{suggestion}?" # or an I18n key, or a lambda
 end
 ```
 
@@ -298,6 +298,25 @@ At most one error is added, however many checks fire — and whenever the gem ca
 | `user@tempmail.com` | "provider is not allowed" | same |
 
 "Doesn't look like a real email address" is true but useless when we know what they meant, so a nameable correction always outranks the generic message.
+
+#### Translating the "Did you mean" message
+
+`lookalike_error_message` takes a String (with `%{suggestion}`), an I18n key, or anything callable. A Symbol is looked up with `I18n.t` when the address is validated, so it answers in the current request's locale, with `suggestion:` to interpolate:
+
+```ruby
+# config/initializers/nondisposable.rb
+config.lookalike_error_message = :"errors.messages.email_typo"
+```
+
+```yaml
+# config/locales/es.yml
+es:
+  errors:
+    messages:
+      email_typo: "parece una errata. ¿Querías decir %{suggestion}?"
+```
+
+`%{suggestion}` is the full corrected address (`ana@gmail.com`), or just the corrected domain when nothing was typed before the `@`. A key with no translation in the current locale falls back to the default English message, never to "Translation missing". For anything else, pass a callable: `config.lookalike_error_message = ->(suggestion) { I18n.t("errors.email_typo", suggestion: suggestion) }`. A String works exactly as before.
 
 ### Direct Check
 

@@ -255,4 +255,85 @@ class NondisposableLookalikeValidationTest < NondisposableTestCase
 
     refute confirmed("someone@#{typo.upcase}.").valid?
   end
+
+  # =========================================================================
+  # lookalike_error_message: String, I18n key or callable (0.6.2)
+  # =========================================================================
+
+  def test_a_symbol_is_an_i18n_key_interpolated_with_the_suggestion
+    I18n.backend.store_translations(:en, nondisposable_test: { typo: "is misspelt. Try %{suggestion}" })
+    enable(:confirmable, lookalike_error_message: :"nondisposable_test.typo")
+
+    hard = confirmed("ana@gmial.com")
+    refute hard.valid?
+    assert_equal ["is misspelt. Try ana@gmail.com"], hard.errors[:email]
+
+    guess = ConfirmingUser.new(email: "ana@gnail.com")
+    refute guess.valid?
+    assert_equal ["is misspelt. Try ana@gmail.com"], guess.errors[:email]
+    assert guess.errors.of_kind?(:email, :lookalike_domain)
+    assert_equal "ana@gmail.com", guess.errors.details[:email].first[:suggestion]
+  end
+
+  def test_a_symbol_answers_in_the_locale_of_the_validation_not_of_the_initializer
+    available = I18n.available_locales
+    I18n.available_locales = available | [:es]
+    I18n.backend.store_translations(:en, nondisposable_test: { typo: "looks like a typo. Did you mean %{suggestion}?" })
+    I18n.backend.store_translations(:es, nondisposable_test: { typo: "parece una errata. ¿Querías decir %{suggestion}?" })
+    enable(:confirmable, lookalike_error_message: :"nondisposable_test.typo")
+
+    I18n.with_locale(:es) do
+      user = User.new(email: "ana@gmial.com")
+      refute user.valid?
+      assert_equal ["parece una errata. ¿Querías decir ana@gmail.com?"], user.errors[:email]
+    end
+
+    user = User.new(email: "ana@gmial.com")
+    refute user.valid?
+    assert_equal ["looks like a typo. Did you mean ana@gmail.com?"], user.errors[:email]
+  ensure
+    I18n.available_locales = available
+  end
+
+  def test_a_symbol_with_no_translation_falls_back_to_the_default_message
+    # Never "Translation missing" in front of a user, and never an exception
+    # that on_check_failure = :allow would turn into an accepted typo.
+    enable(:confirmable, lookalike_error_message: :"nondisposable_test.no_such_key")
+
+    user = User.new(email: "ana@gmial.com")
+    refute user.valid?
+    assert_equal ["looks like a typo. Did you mean ana@gmail.com?"], user.errors[:email]
+  end
+
+  def test_a_callable_is_called_with_the_suggestion
+    enable(:confirmable, lookalike_error_message: ->(suggestion) { "should be #{suggestion}" })
+
+    user = User.new(email: "ana@gmial.com")
+    refute user.valid?
+    assert_equal ["should be ana@gmail.com"], user.errors[:email]
+
+    no_local_part = User.new(email: "@gmial.com")
+    refute no_local_part.valid?
+    assert_equal ["should be gmail.com"], no_local_part.errors[:email]
+  end
+
+  def test_a_string_still_interpolates_exactly_as_before
+    enable(:confirmable, lookalike_error_message: "is wrong (%{suggestion}?)")
+
+    user = User.new(email: "ana@gmial.com")
+    refute user.valid?
+    assert_equal ["is wrong (ana@gmail.com?)"], user.errors[:email]
+  end
+
+  def test_an_object_that_answers_sub_keeps_working
+    # The only way to localise this message before 0.6.2; hosts that did it
+    # must not break on upgrade.
+    localised = Object.new
+    def localised.sub(_placeholder, suggestion) = "custom #{suggestion}"
+    enable(:confirmable, lookalike_error_message: localised)
+
+    user = User.new(email: "ana@gmial.com")
+    refute user.valid?
+    assert_equal ["custom ana@gmail.com"], user.errors[:email]
+  end
 end

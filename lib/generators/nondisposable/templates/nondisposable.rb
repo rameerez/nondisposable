@@ -82,4 +82,6 @@ Nondisposable.configure do |config|
   # config.invalid_tld_error_message = "doesn't look like a real email address"
   # config.blocked_tld_error_message = "domain ending is not allowed"
   # config.lookalike_error_message = "looks like a typo. Did you mean %{suggestion}?"
+  # ...or an I18n key, looked up per request with %{suggestion} to interpolate:
+  # config.lookalike_error_message = :"errors.messages.email_typo"
 end

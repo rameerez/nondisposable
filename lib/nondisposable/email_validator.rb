@@ -86,7 +86,7 @@ module ActiveModel
               suggestion = Nondisposable::KnownTypos.correction_for(value)
             end
             if suggestion
-              message = config.lookalike_error_message.sub('%{suggestion}', suggestion)
+              message = config.lookalike_message(suggestion)
               # Hard: no confirmation can make an impossible TLD deliverable —
               # whether or not the host turned check_tld on, `gmail.con` cannot
               # receive the confirmation email — and a reviewed typo is not a

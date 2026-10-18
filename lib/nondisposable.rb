@@ -70,6 +70,7 @@ module Nondisposable
   class Configuration
     ON_CHECK_FAILURE_MODES = [:allow, :reject].freeze
     LOOKALIKE_MODES = [false, true, :confirmable].freeze
+    DEFAULT_LOOKALIKE_ERROR_MESSAGE = "looks like a typo. Did you mean %{suggestion}?"
 
     attr_accessor :error_message, :additional_domains, :excluded_domains
     # Whether to also match parent domains: with the default true, an email at
@@ -154,7 +155,15 @@ module Nondisposable
     # ---- Error messages -----------------------------------------------------
 
     attr_accessor :invalid_tld_error_message, :blocked_tld_error_message
-    # %{suggestion} is replaced with the full corrected address.
+
+    # "Did you mean …?", in one of three forms (see #lookalike_message):
+    #
+    #   "looks like a typo. Did you mean %{suggestion}?"   a String (default)
+    #   :"errors.messages.email_typo"                      an I18n key
+    #   ->(suggestion) { "…#{suggestion}…" }               a callable
+    #
+    # %{suggestion} is the full corrected address (or the corrected domain,
+    # for a value with nothing before the "@").
     attr_accessor :lookalike_error_message
 
     def initialize
@@ -179,7 +188,28 @@ module Nondisposable
 
       @invalid_tld_error_message = "doesn't look like a real email address"
       @blocked_tld_error_message = "domain ending is not allowed"
-      @lookalike_error_message = "looks like a typo. Did you mean %{suggestion}?"
+      @lookalike_error_message = DEFAULT_LOOKALIKE_ERROR_MESSAGE
+    end
+
+    # The lookalike error for this suggestion, resolved NOW, at validation
+    # time, so a Symbol or a callable answers in the locale of the request
+    # being validated rather than whichever locale the initializer ran in.
+    #
+    # - A Symbol is an I18n key, looked up with `suggestion:` to interpolate.
+    #   A missing translation falls back to the default English message: it
+    #   must never print "Translation missing" to a user, nor raise and let
+    #   on_check_failure = :allow wave a reviewed typo through.
+    # - Anything that responds to #call is called with the suggestion.
+    # - Anything else is treated as before 0.6.2: `%{suggestion}` replaced
+    #   with #sub. That keeps a String exactly as it was, and keeps working
+    #   any object a host passed that answers #sub (the only way to localise
+    #   this message until now).
+    def lookalike_message(suggestion)
+      message = lookalike_error_message
+      return I18n.t(message, suggestion: suggestion, default: DEFAULT_LOOKALIKE_ERROR_MESSAGE) if message.is_a?(Symbol)
+      return message.call(suggestion).to_s if message.respond_to?(:call)
+
+      message.sub('%{suggestion}', suggestion)
     end
 
     # What the validator does when the disposable check itself raises
