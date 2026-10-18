@@ -1,5 +1,37 @@
 # frozen_string_literal: true
 
+module Nondisposable
+  # A validation error whose message was resolved when it was added, and is
+  # never resolved again.
+  #
+  # An ordinary `errors.add(:email, :some_type, message: "…")` keeps the type
+  # and looks the message up AGAIN every time it is read: the first key of
+  # ActiveModel's chain in whatever locale is current then, and I18n
+  # interpolation over the text. For "Did you mean …?" both are hazards. The
+  # text contains what the user typed, and `%`, `{` and `}` are legal in a
+  # local part, so `a%{x}b@gnail.com` made errors.full_messages raise
+  # I18n::MissingInterpolationArgument (since 0.5.0) and `a%{value}b@…` pasted
+  # the whole address into the middle of it. And a Symbol message we already
+  # checked could resolve differently at render time (another locale, a
+  # translation Proc that raises the second time), outside any fallback.
+  #
+  # So the message is frozen here, while the type and details stay what a
+  # form and an API expect: `errors.of_kind?(:email, :lookalike_domain)`,
+  # `errors.details[:email]` => [{ error: :lookalike_domain, suggestion: … }].
+  # It is in the locale of the request that validated, which is the request
+  # that renders it.
+  class LookalikeError < ActiveModel::Error
+    def initialize(base, attribute, type, resolved_message, **options)
+      super(base, attribute, type, **options)
+      @resolved_message = resolved_message
+    end
+
+    def message
+      @resolved_message
+    end
+  end
+end
+
 module ActiveModel
   module Validations
     class NondisposableValidator < EachValidator
@@ -209,40 +241,53 @@ module ActiveModel
       # Symbol, an error of that name, just as error_message and the TLD
       # messages are added.
       #
-      # A Symbol goes through errors.add, so it resolves through the same
-      # ActiveModel chain as every other Rails error name. It is tried once
-      # here first, though: a translation that is missing, names a variable we
-      # don't pass, or is a whole group (a Hash) is a refusal with a broken
-      # message, and we refuse with the default message instead — never a
-      # raise, which on_check_failure = :allow would turn into an acceptance.
+      # A Symbol resolves through the same ActiveModel chain as every other
+      # Rails error name, but NOW, once, into a String (see
+      # Nondisposable::LookalikeError for why it is never resolved again). A
+      # translation that is missing, names a variable we don't pass, or is a
+      # whole group (a Hash) is a refusal with a broken message, and we refuse
+      # with the default message instead — never a raise, which
+      # on_check_failure = :allow would turn into an acceptance.
       def add_lookalike_error(record, attribute, config, suggestion, confirmable:)
         key = config.lookalike_error_message
         message =
-          if !key.is_a?(Symbol) then config.lookalike_message(suggestion)
-          elsif translatable?(record, attribute, config, key, suggestion) then key
-          else config.default_lookalike_message(suggestion)
+          if key.is_a?(Symbol)
+            resolve_rails_message(record, attribute, config, key, suggestion) || config.default_lookalike_message(suggestion)
+          else
+            config.lookalike_message(suggestion)
           end
 
         if confirmable
-          record.errors.add(attribute, :lookalike_domain, message: message, suggestion: suggestion)
-        elsif message.is_a?(Symbol)
-          record.errors.add(attribute, message, suggestion: suggestion)
+          add_resolved(record, attribute, :lookalike_domain, message, suggestion)
+        elsif key.is_a?(Symbol)
+          add_resolved(record, attribute, key, message, suggestion)
         else
+          # A plain String error: never interpolated when read, nothing to freeze.
           record.errors.add(attribute, message)
         end
         nil
       end
 
-      # Would this Rails error name resolve to a String for this record, in
-      # the current locale (and its I18n fallbacks, when the host has them on)?
-      def translatable?(record, attribute, config, key, suggestion)
+      # Errors#add would build an ActiveModel::Error that re-resolves its
+      # message on every read; this appends one that does not, the same way
+      # Errors#add appends its own.
+      def add_resolved(record, attribute, type, message, suggestion)
+        record.errors.objects.append(
+          Nondisposable::LookalikeError.new(record, attribute.to_sym, type, message, suggestion: suggestion)
+        )
+      end
+
+      # This Rails error name as a String for this record, in the current
+      # locale (and its I18n fallbacks, when the host has them on), or nil
+      # when it cannot be one.
+      def resolve_rails_message(record, attribute, config, key, suggestion)
         text = record.errors.generate_message(attribute, key, suggestion: suggestion, raise: true)
         raise TypeError, "it resolved to #{text.class}, not a String" unless text.is_a?(String)
 
-        true
+        text
       rescue StandardError => e
         config.default_lookalike_message(suggestion, e) # logs it
-        false
+        nil
       end
 
       def reject(record, attribute, message)

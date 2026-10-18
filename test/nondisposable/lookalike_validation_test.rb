@@ -293,15 +293,25 @@ class NondisposableLookalikeValidationTest < NondisposableTestCase
     end
   end
 
-  def test_the_bundled_snapshot_still_carries_the_overlap_this_release_was_about
-    # A soft check, never a failure: it is upstream's data, and a refresh may
-    # drop these. If it does, the tests above (on our own list) still hold;
-    # this only says the motivating case is gone from the bundled file.
+  def test_the_real_bundled_seed_keeps_the_overlap_and_the_message_follows_the_setting
+    # On the real bundled list, through the real seed: if the seed ever stops
+    # storing gmial.com, this fails. Only if upstream itself drops it from the
+    # file does it skip (their data; the tests above, on our own list, still
+    # hold).
     bundled = File.readlines(Nondisposable::DomainListUpdater::BUNDLED_LIST_PATH, chomp: true).map { |line| line.strip.downcase }
-    missing = LISTED_TYPOS_IN_SNAPSHOT.keys - bundled
-    skip "the bundled blocklist no longer lists #{missing.join(', ')}" if missing.any?
+    skip "the bundled blocklist no longer lists gmial.com" unless bundled.include?("gmial.com")
 
-    LISTED_TYPOS_IN_SNAPSHOT.each_key { |typo| assert Nondisposable::KnownTypos.include?(typo) }
+    assert Nondisposable::DomainListUpdater.seed
+    assert Nondisposable::DisposableDomain.exists?(name: "gmial.com"), "the seed must store a listed reviewed typo"
+
+    off = User.new(email: "ana@gmial.com")
+    refute off.valid?
+    assert_equal ["provider is not allowed"], off.errors[:email]
+
+    enable
+    on = User.new(email: "ana@gmial.com")
+    refute on.valid?
+    assert_equal ["looks like a typo. Did you mean ana@gmail.com?"], on.errors[:email]
   end
 
   def test_every_known_typo_gets_its_correction_even_if_a_blocklist_lists_it
@@ -596,6 +606,88 @@ class NondisposableLookalikeValidationTest < NondisposableTestCase
     refute guess.valid?
     assert guess.errors.of_kind?(:email, :lookalike_domain)
     assert_equal ["looks like a typo. Did you mean ana@gmail.com?"], guess.errors[:email]
+  end
+
+  # ---- Resolved once, never again (Nondisposable::LookalikeError) ---------
+
+  def test_a_symbol_message_is_resolved_at_validation_and_not_again_in_another_locale
+    available = I18n.available_locales
+    I18n.available_locales = available | [:es]
+    I18n.backend.store_translations(:en, errors: { messages: { nd_en_only: "en: did you mean %{suggestion}?" } })
+    enable(:confirmable, lookalike_error_message: :nd_en_only)
+
+    hard = User.new(email: "ana@gmial.com")
+    guess = ConfirmingUser.new(email: "ana@gnail.com")
+    refute hard.valid?
+    refute guess.valid?
+
+    # Rendered under a locale without the key: what was resolved stands,
+    # never "Translation missing".
+    I18n.with_locale(:es) do
+      assert_equal ["Email en: did you mean ana@gmail.com?"], hard.errors.full_messages
+      assert_equal ["Email en: did you mean ana@gmail.com?"], guess.errors.full_messages
+    end
+  ensure
+    I18n.available_locales = available
+  end
+
+  def test_a_translation_proc_is_called_once_so_rendering_cannot_raise
+    # At the FIRST key of the chain, the one Rails would look up again on
+    # every read of an ordinary error.
+    calls = 0
+    once = lambda do |_key, options|
+      calls += 1
+      raise "called again at render time" if calls > 1
+
+      "once: #{options[:suggestion]}"
+    end
+    I18n.backend.store_translations(:en, activerecord: { errors: { models: { user: { attributes: { email: { nd_once: once } } } } } })
+    enable(:confirmable, lookalike_error_message: :nd_once)
+
+    user = User.new(email: "ana@gmial.com")
+    refute user.valid?
+    assert_equal ["Email once: ana@gmail.com"], user.errors.full_messages
+    assert_equal ["once: ana@gmail.com"], user.errors[:email]
+    assert_equal 1, calls
+  end
+
+  def test_percent_braces_typed_in_the_local_part_are_printed_not_interpolated
+    # `%`, `{` and `}` are legal in a local part. Before, reading the
+    # confirmable error raised I18n::MissingInterpolationArgument for
+    # `%{x}`, and `%{value}` pasted the whole address into the message.
+    I18n.backend.store_translations(:en, errors: { messages: { nd_pct: "typo: %{suggestion}" } })
+
+    enable
+    %w[a%{x}b a%{value}b a%%b].each do |local|
+      guess = ConfirmingUser.new(email: "#{local}@gnail.com")
+      refute guess.valid?
+      assert_equal ["looks like a typo. Did you mean #{local}@gmail.com?"], guess.errors[:email]
+    end
+
+    Nondisposable.configuration.lookalike_error_message = :nd_pct
+    hard = User.new(email: "a%{x}b@gmial.com")
+    refute hard.valid?
+    assert_equal ["Email typo: a%{x}b@gmail.com"], hard.errors.full_messages
+  end
+
+  def test_a_resolved_error_keeps_its_type_details_and_survives_copying
+    I18n.backend.store_translations(:en, errors: { messages: { nd_kept: "kept %{suggestion}" } })
+    enable(:confirmable, lookalike_error_message: :nd_kept)
+
+    guess = ConfirmingUser.new(email: "ana@gnail.com")
+    refute guess.valid?
+    assert guess.errors.of_kind?(:email, :lookalike_domain)
+    assert_equal [{ error: :lookalike_domain, suggestion: "ana@gmail.com" }], guess.errors.details[:email]
+
+    hard = User.new(email: "ana@gmial.com")
+    refute hard.valid?
+    assert hard.errors.of_kind?(:email, :nd_kept)
+    assert_equal [{ error: :nd_kept, suggestion: "ana@gmail.com" }], hard.errors.details[:email]
+
+    other = User.new
+    other.errors.merge!(hard.errors)
+    assert_equal ["kept ana@gmail.com"], other.errors[:email]
+    assert_equal ["kept ana@gmail.com"], hard.errors.dup[:email]
   end
 
   def test_a_nil_message_still_refuses
