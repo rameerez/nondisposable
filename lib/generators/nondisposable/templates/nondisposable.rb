@@ -82,4 +82,8 @@ Nondisposable.configure do |config|
   # config.invalid_tld_error_message = "doesn't look like a real email address"
   # config.blocked_tld_error_message = "domain ending is not allowed"
   # config.lookalike_error_message = "looks like a typo. Did you mean %{suggestion}?"
+  # ...or a Rails error name, like the messages above: looked up per request
+  # through ActiveModel's chain, e.g. errors.messages.email_lookalike in your
+  # locale files, with %{suggestion} to interpolate:
+  # config.lookalike_error_message = :email_lookalike
 end

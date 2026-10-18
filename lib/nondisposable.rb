@@ -70,6 +70,7 @@ module Nondisposable
   class Configuration
     ON_CHECK_FAILURE_MODES = [:allow, :reject].freeze
     LOOKALIKE_MODES = [false, true, :confirmable].freeze
+    DEFAULT_LOOKALIKE_ERROR_MESSAGE = "looks like a typo. Did you mean %{suggestion}?"
 
     attr_accessor :error_message, :additional_domains, :excluded_domains
     # Whether to also match parent domains: with the default true, an email at
@@ -154,8 +155,22 @@ module Nondisposable
     # ---- Error messages -----------------------------------------------------
 
     attr_accessor :invalid_tld_error_message, :blocked_tld_error_message
-    # %{suggestion} is replaced with the full corrected address.
-    attr_accessor :lookalike_error_message
+
+    # "Did you mean …?", in one of three forms:
+    #
+    #   "looks like a typo. Did you mean %{suggestion}?"   a String (default)
+    #   :email_lookalike                                   a Rails error name
+    #   ->(suggestion) { "…#{suggestion}…" }               a callable
+    #
+    # %{suggestion} is the full corrected address (or the corrected domain,
+    # for a value with nothing before the "@").
+    #
+    # A Symbol means what it means for error_message and the TLD messages: a
+    # Rails error name, looked up through ActiveModel's chain
+    # (activerecord.errors.models.user.attributes.email.email_lookalike, …,
+    # errors.messages.email_lookalike), with %{suggestion} as well as
+    # %{attribute} and %{value} to interpolate.
+    attr_reader :lookalike_error_message
 
     def initialize
       @error_message = "provider is not allowed"
@@ -179,7 +194,79 @@ module Nondisposable
 
       @invalid_tld_error_message = "doesn't look like a real email address"
       @blocked_tld_error_message = "domain ending is not allowed"
-      @lookalike_error_message = "looks like a typo. Did you mean %{suggestion}?"
+      @lookalike_error_message = DEFAULT_LOOKALIKE_ERROR_MESSAGE
+    end
+
+    # `:lookalike_domain` is the TYPE of the confirmable error — the one a form
+    # offers "yes, this is right" for (errors.of_kind?(:email, :lookalike_domain)).
+    # As the name of the hard error too it would put that checkbox next to a
+    # refusal no confirmation can lift, so it fails at boot instead.
+    def lookalike_error_message=(message)
+      if message == :lookalike_domain
+        raise ArgumentError, "lookalike_error_message cannot be :lookalike_domain, the type of the confirmable error: " \
+                             "name the translation anything else (e.g. :email_lookalike)"
+      end
+
+      @lookalike_error_message = message
+    end
+
+    # The lookalike error for this suggestion as a String, resolved NOW, at
+    # validation time, so it answers in the locale of the request being
+    # validated rather than whichever locale the initializer ran in.
+    #
+    # - A Symbol: outside a model there is no ActiveModel chain to walk, so
+    #   this looks up its last link, errors.messages.<name>. (The validator
+    #   adds a Symbol through errors.add instead, so a per-model or
+    #   per-attribute translation wins there.)
+    # - Anything that responds to #call is called with the suggestion.
+    # - Anything else is treated as before 0.6.2: `%{suggestion}` replaced
+    #   with #sub. That keeps a String exactly as it was, and keeps working
+    #   any object a host passed that answers #sub (the only way to localise
+    #   this message until now). A String is substituted with the block
+    #   form, so a `\0` or `\&` typed in the local part is printed, not read
+    #   as a back-reference.
+    #
+    # NEVER RAISES. By the time we phrase this message the address is already
+    # refused; the only open question is the wording. A missing translation,
+    # one naming a variable we don't pass (`%{address}`), a key naming a whole
+    # translation group (a Hash), a nil message, or a callable that raises or
+    # takes no argument would otherwise reach the validator's rescue, where
+    # the default on_check_failure = :allow ACCEPTS the address — a listed
+    # typo let through by a broken locale file. So any failure, or anything
+    # that is not a String, falls back to the default English message, logged
+    # so the host can fix it.
+    def lookalike_message(suggestion)
+      message = lookalike_error_message
+      text =
+        if message.is_a?(Symbol)
+          I18n.t(:"errors.messages.#{message}", suggestion: suggestion, raise: true)
+        elsif message.respond_to?(:call)
+          message.call(suggestion)
+        elsif message.is_a?(String)
+          message.sub('%{suggestion}') { suggestion }
+        else
+          message.sub('%{suggestion}', suggestion) # a host's own object, called exactly as before 0.6.2
+        end
+      raise TypeError, "it resolved to #{text.class}, not a String" unless text.is_a?(String)
+
+      text
+    rescue StandardError => e
+      default_lookalike_message(suggestion, e)
+    end
+
+    # The gem's own English message, for when the host's cannot be used.
+    # Given the error that made it necessary, logs it.
+    def default_lookalike_message(suggestion, error = nil)
+      if error
+        log_message = "[nondisposable] Could not use lookalike_error_message #{lookalike_error_message.inspect} " \
+                      "(#{error.class}: #{error.message}); using the default message, the address is still refused."
+        if defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
+          Rails.logger.error(log_message)
+        else
+          warn log_message
+        end
+      end
+      DEFAULT_LOOKALIKE_ERROR_MESSAGE.sub('%{suggestion}') { suggestion.to_s }
     end
 
     # What the validator does when the disposable check itself raises
